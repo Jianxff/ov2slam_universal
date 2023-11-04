@@ -1,0 +1,14 @@
+.*
+!.babelrc
+!.gitignore
+!.prettierrc
+!.editorconfig
+!.eslintrc.json
+!.prettierrc
+!.eslintignore
+!.buildpacks
+
+node_modules
+__pycache__
+
+build/*
