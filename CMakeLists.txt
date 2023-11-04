@@ -20,12 +20,12 @@ find_package(OpenCV 3 REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
 
 # Ceres
-set(Ceres_DIR ${PROJECT_SOURCE_DIR}/Thirdparty/install/lib/cmake/Ceres)
+set(Ceres_DIR ${PROJECT_SOURCE_DIR}/Thirdparty/ceres-solver/install/lib/cmake/Ceres)
 find_package(Ceres REQUIRED)
 
 #Sophus
 # First search for a custom build of Sophus within this project
-set(Sophus_DIR ${PROJECT_SOURCE_DIR}/Thirdparty/install/share/sophus/cmake) 
+set(Sophus_DIR ${PROJECT_SOURCE_DIR}/Thirdparty/Sophus/install/share/sophus/cmake) 
 find_package(Sophus REQUIRED)
 
 find_package(Pangolin REQUIRED)
@@ -80,8 +80,7 @@ target_include_directories(
 target_link_libraries(
   ${PROJECT_NAME}
     PRIVATE
-      ${PROJECT_SOURCE_DIR}/Thirdparty/install/lib/liblcdetector.so
-      ${PROJECT_SOURCE_DIR}/Thirdparty/install/lib/libobindex2.so
+      ${PROJECT_SOURCE_DIR}/Thirdparty/ibow_lcd/build/liblcdetector.so
 )
 
 

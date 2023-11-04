@@ -7,6 +7,8 @@
 !.prettierrc
 !.eslintignore
 !.buildpacks
+**/build
+**/install
 
 node_modules
 __pycache__
