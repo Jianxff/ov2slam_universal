@@ -456,39 +456,42 @@ void SlamManager::reset()
 cv::Mat SlamManager::visualFrame()
 {
     // Display keypoints
-    cv::Mat img_2_pub = cv::Mat();
+    cv::Mat img = cv::Mat(pslamstate_->img_left_h_, pslamstate_->img_left_w_, CV_8UC3);
     cv::Mat img_clone;
 
     {
         std::lock_guard<std::mutex> lock(pvisualfrontend_->img_mutex_);
         img_clone = pvisualfrontend_->cur_img_.clone();
     }
+    
+    std::stringstream ss;
 
-    if(img_clone.empty()) {
-        return img_2_pub;
-    }
-
-    cv::cvtColor(img_clone, img_2_pub, CV_GRAY2RGB);
-
-    for( const auto &kp : pcurframe_->getKeypoints() ) {
-        cv::Scalar col;
-
-        if(kp.is_retracked_) {
-            if(kp.is3d_) {
-                col = cv::Scalar(0,255,0);
-            } else {
-                col = cv::Scalar(235, 235, 52);
-            } 
-        } else if(kp.is3d_) {
-            col = cv::Scalar(255,0,0);
-        } else {
-            col = cv::Scalar(0,0,255);
+    if(! img_clone.empty()) {
+        cv::cvtColor(img_clone, img, CV_GRAY2RGB);
+        for( const auto &kp : pcurframe_->getKeypoints() ) {
+            cv::Scalar col = kp.is_retracked_ ? ( kp.is3d_ ? cv::Scalar(0,255,0) : cv::Scalar(235, 235, 52) )
+                : (kp.is3d_ ? cv::Scalar(255,0,0) : cv::Scalar(0,0,255));
+            cv::circle(img, kp.px_, 4, col, -1);
         }
 
-        cv::circle(img_2_pub, kp.px_, 4, col, -1);
+        if( pslamstate_->breset_req_ ) ss << "RESET REQUIRED";
+        else ss << (pslamstate_->slam_mode_ ? " SLAM ON  |  " : " SLAM OFF |  ") 
+                << "KEY FRAMES : " << (pmap_->map_pkfs_.size()) <<", MAP POINTS : " << (pmap_->map_plms_.size());
+    } else {
+        ss << "WAITING FOR IMAGES";
     }
 
-    return img_2_pub;
+    int baseline = 0;
+    cv::Size textSize = cv::getTextSize(ss.str(), cv::FONT_HERSHEY_PLAIN, 1, 1, &baseline);
+    
+    cv::Mat img_text = cv::Mat(img.rows + textSize.height + 10, img.cols, img.type());
+    img.copyTo(img_text.rowRange(0, img.rows).colRange(0, img.cols));
+    img_text.rowRange(img.rows, img_text.rows) =
+        cv::Mat::zeros(textSize.height + 10, img.cols, img.type());
+    cv::putText(img_text, ss.str(), cv::Point(5, img_text.rows - 5),
+                cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(255, 255, 255), 1, 8);
+
+    return img_text;
 }
 
 // ==========================
