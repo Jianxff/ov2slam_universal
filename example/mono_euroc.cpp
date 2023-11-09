@@ -40,43 +40,54 @@ void load_images(const std::string& img_folder, const std::string &img_ts_path,
   }
 }
 
-// ./mono_euroc ../parameters_files/fast/euroc/euroc_mono.yaml ~/dataset/mav0/cam0/data ../example/euroc_ts/V101.txt
+// ./mono_euroc ../parameters_files/accurate/euroc/euroc_mono.yaml ~/dataset/mav0/cam0/data ../example/euroc_ts/V101.txt
 
 int main(int argc, char** argv) {
-    std::vector<std::string> img_path;
-    std::vector<double> img_ts;
+  std::vector<std::string> img_path;
+  std::vector<double> img_ts;
 
-    load_images(std::string(argv[2]), std::string(argv[3]), img_path, img_ts);
+  load_images(std::string(argv[2]), std::string(argv[3]), img_path, img_ts);
 
-    // Load the parameters
-    std::string parameters_file = argv[1];
+  // Load the parameters
+  std::string parameters_file = argv[1];
 
-    const cv::FileStorage fsSettings(parameters_file.c_str(), cv::FileStorage::READ);
-    if(!fsSettings.isOpened()) {
-        std::cout << "Failed to open settings file";
-        return 1;
-    }
+  const cv::FileStorage fsSettings(parameters_file.c_str(), cv::FileStorage::READ);
+  if(!fsSettings.isOpened()) {
+      std::cout << "Failed to open settings file";
+      return 1;
+  }
 
-    std::shared_ptr<SlamParams> pparams;
-    pparams.reset( new SlamParams(fsSettings) );
+  std::shared_ptr<SlamParams> pparams;
+  pparams.reset( new SlamParams(fsSettings) );
 
-    std::shared_ptr<SlamManager> pslam;
-    pslam.reset( new SlamManager(pparams) );
+  std::shared_ptr<SlamManager> pslam;
+  pslam.reset( new SlamManager(pparams) );
 
-    std::shared_ptr<Visualize> pviz;
-    pviz.reset( new Visualize(pslam) );
+  std::shared_ptr<Visualize> pviz;
+  pviz.reset( new Visualize(pslam) );
 
-    std::thread slam_thread(&SlamManager::run, pslam);
-    slam_thread.detach();
-    
-    std::thread viz_thread(&Visualize::run, pviz);
-    viz_thread.detach();
+  std::thread slam_thread(&SlamManager::run, pslam);
+  slam_thread.detach();
+  
+  std::thread viz_thread(&Visualize::run, pviz);
+  viz_thread.detach();
 
-    for(size_t i = 0; i < img_path.size(); ++i) {
-        cv::Mat im = cv::imread(img_path[i], CV_LOAD_IMAGE_UNCHANGED);
-        pslam->addNewMonoImage(img_ts[i], im);
-        usleep(1000 * 1000 / 30);
-    }
+  for(size_t i = 0; i < img_path.size(); ++i) {
+      if(i == 1800){
+        i = 2205;
+        std::cout << "- [main] start RL testing\n";
+      }
 
+      if(i < 1800) usleep(1000 * 1000 / 30);
+      else usleep(1000 * 1000 / 10);
+      
+      cv::Mat im = cv::imread(img_path[i], CV_LOAD_IMAGE_UNCHANGED);
+      pslam->addNewMonoImage(img_ts[i], im);
+
+      
+  }
+
+  cv::waitKey(0);
+  //  ../parameters_files/accurate/euroc/euroc_mono.yaml ~/dataset/mav0/cam0/data ../example/euroc_ts/V101.txt
   return 0;
 }

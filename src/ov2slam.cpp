@@ -102,15 +102,19 @@ SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate)
     // Map Manager will handle Keyframes / MapPoints
     pmap_.reset( new MapManager(pslamstate_, pcurframe_, pfeatextract_, ptracker_) );
 
+    // LCDetector with online BoW
+    
+    plcdetector_.reset( new ibow_lcd::LCDetector(ibow_lcd::LCDetectorParams()) );
+
     // Visual Front-End processes every incoming frames 
     pvisualfrontend_.reset( new VisualFrontEnd(pslamstate_, pcurframe_, 
-                                    pmap_, ptracker_
+                                    pmap_, ptracker_, plcdetector_
                                 )
                             );
 
     // Mapper thread handles Keyframes' processing
     // (i.e. triangulation, local map tracking, BA, LC)
-    pmapper_.reset( new Mapper(pslamstate_, pmap_, pcurframe_) );
+    pmapper_.reset( new Mapper(pslamstate_, pmap_, pcurframe_, plcdetector_) );
 }
 
 void SlamManager::run()
@@ -122,8 +126,8 @@ void SlamManager::run()
     cv::Mat img_left, img_right;
 
     double time = -1.; // Current image timestamp
-    double cam_delay = -1.; // Delay between two successive images
-    double last_img_time = -1.; // Last received image time
+    // double cam_delay = -1.; // Delay between two successive images
+    // double last_img_time = -1.; // Last received image time
 
     // Main SLAM loop
     while( !bexit_required_ ) {
@@ -136,16 +140,16 @@ void SlamManager::run()
             frame_id_++;
             pcurframe_->updateFrame(frame_id_, time);
 
-            // Update cam delay for automatic exit
-            double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
-            if( frame_id_ > 0 ) {
-                cam_delay = time_now_ms / 1e3 - last_img_time;
-                last_img_time += cam_delay;
-            } else {
-                last_img_time = time_now_ms / 1e3;
-            }
+            // // Update cam delay for automatic exit
+            // double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+            //         std::chrono::system_clock::now().time_since_epoch()
+            //     ).count();
+            // if( frame_id_ > 0 ) {
+            //     cam_delay = time_now_ms / 1e3 - last_img_time;
+            //     last_img_time += cam_delay;
+            // } else {
+            //     last_img_time = time_now_ms / 1e3;
+            // }
 
             // Display info on current frame state
             if( pslamstate_->debug_ )
@@ -198,31 +202,31 @@ void SlamManager::run()
         } 
         else {
 
-            // 3. Check if we are done with a sequence!
-            // ========================================
-            bool c1 = cam_delay > 0;
-            double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
-            bool c2 = ( time_now_ms / 1e3 - last_img_time ) > 100. * cam_delay;
-            bool c3 = !bnew_img_available_;
+            // // 3. Check if we are done with a sequence!
+            // // ========================================
+            // bool c1 = cam_delay > 0;
+            // double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+            //         std::chrono::system_clock::now().time_since_epoch()
+            //     ).count();
+            // bool c2 = ( time_now_ms / 1e3 - last_img_time ) > 100. * cam_delay;
+            // bool c3 = !bnew_img_available_;
 
-            if( c1 && c2 && c3 )
-            {
-                bexit_required_ = true;
+            // if( c1 && c2 && c3 )
+            // {
+            //     bexit_required_ = true;
 
-                // Warn threads to stop and then save the results only in this case of 
-                // automatic stop because end of sequence reached 
-                // (avoid wasting time when forcing stop by CTRL+C)
-                pmapper_->bexit_required_ = true;
+            //     // Warn threads to stop and then save the results only in this case of 
+            //     // automatic stop because end of sequence reached 
+            //     // (avoid wasting time when forcing stop by CTRL+C)
+            //     pmapper_->bexit_required_ = true;
 
-                writeResults();
+            //     writeResults();
 
-            }
-            else {
+            // }
+            // else {
                 std::chrono::milliseconds dura(1);
                 std::this_thread::sleep_for(dura);
-            }
+            // }
         }
     }
 
@@ -473,10 +477,17 @@ cv::Mat SlamManager::visualFrame()
                 : (kp.is3d_ ? cv::Scalar(255,0,0) : cv::Scalar(0,0,255));
             cv::circle(img, kp.px_, 4, col, -1);
         }
+  
+        if( pslamstate_->tracking_ == TRACKING::RESET ) ss << "RESET REQUIRED";
+        else {
+            if( pslamstate_->tracking_ == TRACKING::LOST ) ss << " TRACING LOST |  ";
+            else ss << (pslamstate_->do_track_only_ ? " TRACK ONLY   |  " : " SLAM MODE    |  ");
 
-        if( pslamstate_->breset_req_ ) ss << "RESET REQUIRED";
-        else ss << (pslamstate_->slam_mode_ ? " SLAM ON  |  " : " SLAM OFF |  ") 
-                << "KEY FRAMES : " << (pmap_->map_pkfs_.size()) <<", MAP POINTS : " << (pmap_->map_plms_.size());
+            ss << "KEY FRAMES : " << (pmap_->map_pkfs_.size()) <<", MAP POINTS : " << (pmap_->map_plms_.size());
+        }
+
+        ss << "  [" << pcurframe_->id_ << "]";
+                
     } else {
         ss << "WAITING FOR IMAGES";
     }

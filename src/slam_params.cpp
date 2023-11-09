@@ -164,6 +164,14 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
 
     // Apply Full BA?
     do_full_ba_ = static_cast<int>(fsSettings["do_full_ba"]);
+
+    // Apply Relocalization ?
+    // do_relocalize_ = static_cast<int>(fsSettings["do_relocalize"]);
+    // do_track_only_ = static_cast<int>(fsSettings["do_track_only"]);
+
+    tracking_ = TRACKING::RESET;
+    block_lc_ = false;
+    rl_cnt = 0;
 }
 
 void SlamParams::reset() {
@@ -171,4 +179,6 @@ void SlamParams::reset() {
     blc_is_on_ = false;
     bvision_init_ = false;
     breset_req_ = false;
+    
+    tracking_ = TRACKING::RESET;
 }

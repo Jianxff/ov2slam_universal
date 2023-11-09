@@ -30,10 +30,10 @@
 #include "opencv2/video/tracking.hpp"
 
 Mapper::Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, 
-            std::shared_ptr<Frame> pframe)
+            std::shared_ptr<Frame> pframe, std::shared_ptr<ibow_lcd::LCDetector> plcdetector)
     : pslamstate_(pslamstate), pmap_(pmap), pcurframe_(pframe)
     , pestimator_( new Estimator(pslamstate_, pmap_) )
-    , ploopcloser_( new LoopCloser(pslamstate_, pmap_) )
+    , ploopcloser_( new LoopCloser(pslamstate_, pmap_, plcdetector) )
 {
     std::thread mapper_thread(&Mapper::run, this);
     mapper_thread.detach();

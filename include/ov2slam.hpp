@@ -30,6 +30,8 @@
 #include <queue>
 #include <mutex>
 
+#include <ibow_lcd/lcdetector.h>
+
 #include "slam_params.hpp"
 
 #include "logger.hpp"
@@ -87,6 +89,8 @@ public:
     std::shared_ptr<Frame> pcurframe_;
 
     std::shared_ptr<MapManager> pmap_;
+
+    std::shared_ptr<ibow_lcd::LCDetector> plcdetector_;
 
     std::unique_ptr<VisualFrontEnd> pvisualfrontend_;
     std::unique_ptr<Mapper> pmapper_;

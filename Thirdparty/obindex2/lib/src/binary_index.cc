@@ -156,10 +156,12 @@ void ImageIndex::searchImages(const cv::Mat& descs,
                               std::vector<ImageMatch>* img_matches,
                               bool sort) {
   // Initializing the resulting structure
-  img_matches->resize(nimages_);
-  for (unsigned i = 0; i < nimages_; i++) {
-    img_matches->at(i).image_id = i;
-  }
+  // img_matches->resize(nimages_);
+  std::unordered_map<unsigned int, ImageMatch> map_img_matches;
+  map_img_matches.reserve(nimages_);
+  // for (unsigned i = 0; i < nimages_; i++) {
+  //   img_matches->at(i).image_id = i;
+  // }
 
   // Counting the number of each word in the current document
   std::unordered_map<int, int> nwi_map;
@@ -193,9 +195,17 @@ void ImageIndex::searchImages(const cv::Mat& descs,
 
     for (unsigned i = 0; i < inv_index_[desc].size(); i++) {
         int im = inv_index_[desc][i].image_id;
-        img_matches->at(im).score += tfidf;
+        if( map_img_matches.find(im) == map_img_matches.end() ) {
+            map_img_matches.emplace(im, ImageMatch(im, tfidf));
+        } else {
+          map_img_matches.at(im).score += tfidf;
+        }
     }
   }
+
+  img_matches->reserve(nimages_);
+  for(auto& kv : map_img_matches) 
+    img_matches->emplace_back(kv.second);
 
   if (sort) {
     std::sort(img_matches->begin(), img_matches->end());

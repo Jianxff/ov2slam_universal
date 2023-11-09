@@ -41,6 +41,8 @@
 
 #include "profiler.hpp"
 
+enum TRACKING {RESET, OK, LOST, RELOCATING };
+
 class SlamParams {
 
 public:
@@ -160,4 +162,13 @@ public:
 
     // Final BA
     bool do_full_ba_;
+
+    // Relocalization and Track-only
+    bool do_relocalize_;
+    bool do_track_only_;
+
+    TRACKING tracking_;
+    bool block_lc_;
+    unsigned int rl_cnt;
+
 };

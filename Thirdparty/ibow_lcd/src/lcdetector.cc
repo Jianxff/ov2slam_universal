@@ -57,15 +57,19 @@ void LCDetector::process(const unsigned image_id,
                          LCDetectorResult* result) {
   result->query_id = image_id;
 
-  // Storing the keypoints and descriptors
-  prev_kps_.push_back(kps);
-  prev_descs_.push_back(descs);
+  bool search_only = (image_id == (unsigned)-1);
 
-  // Adding the current image to the queue to be added in the future
-  queue_ids_.push(image_id);
+  // Storing the keypoints and descriptors
+  if( !search_only ) {
+    prev_kps_.push_back(kps);
+    prev_descs_.push_back(descs);
+
+    // Adding the current image to the queue to be added in the future
+    queue_ids_.push(image_id);
+  }
 
   // Assessing if, at least, p images have arrived
-  if (queue_ids_.size() < p_) {
+  if ( !search_only && queue_ids_.size() < p_) {
     result->status = LC_NOT_ENOUGH_IMAGES;
     result->train_id = 0;
     result->inliers = 0;
@@ -74,14 +78,16 @@ void LCDetector::process(const unsigned image_id,
   }
 
   // Adding new hypothesis
-  unsigned newimg_id = queue_ids_.front();
-  queue_ids_.pop();
+  if( !search_only ) {
+    unsigned newimg_id = queue_ids_.front();
+    queue_ids_.pop();
 
-  addImage(newimg_id, prev_kps_[newimg_id], prev_descs_[newimg_id]);
+    addImage(newimg_id, prev_kps_[newimg_id], prev_descs_[newimg_id]);
+  }
 
   // Assessing that enough new KFs received
   // since last LC
-  if( result->query_id < last_lc_result_.query_id + nframes_after_lc_ ) {
+  if( !search_only && result->query_id < last_lc_result_.query_id + nframes_after_lc_ ) {
     result->status = LC_NOT_ENOUGH_IMAGES;
     result->train_id = 0;
     result->inliers = 0;

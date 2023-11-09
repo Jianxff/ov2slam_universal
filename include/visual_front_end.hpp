@@ -31,6 +31,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <ibow_lcd/lcdetector.h>
+
 #include "slam_params.hpp"
 #include "map_manager.hpp"
 #include "feature_tracker.hpp"
@@ -96,7 +98,8 @@ public:
 
     VisualFrontEnd() {}
     VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframerame, 
-        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker);
+        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker,
+        std::shared_ptr<ibow_lcd::LCDetector> plcdetector);
 
     bool visualTracking(cv::Mat &iml, double time);
 
@@ -126,9 +129,20 @@ public:
     void resetFrame();
     void reset();
 
+    bool relocalize();
+    bool processRelocalizeCandidate(int kfid);
+    void createRelocalizeFrame(std::vector<cv::KeyPoint>& vcvkps, cv::Mat& cvdescs, bool extra_pts = false);
+    void knnMatch(const cv::Mat &descs,const Frame& kf, std::vector<std::pair<int,int>> &vkplmids);
+    bool epipolarFiltering(const Frame& kf, std::vector<int> &vlmids, std::vector<int> &voutliers_idx);
+    void removeOutliers(std::vector<int> &vlmids, std::vector<int> &voutliers_idx);
+    bool p3pRansac(const Frame& kf, std::vector<int> &vlmids, std::vector<int> &voutliers_idx, Sophus::SE3d &Twc);
+    void removeTempMapPoints();
+
     std::shared_ptr<SlamParams> pslamstate_;
     std::shared_ptr<Frame> pcurframe_;
     std::shared_ptr<MapManager> pmap_;
+
+    std::shared_ptr<ibow_lcd::LCDetector> plcdetector_;
 
     std::shared_ptr<FeatureTracker> ptracker_;
 

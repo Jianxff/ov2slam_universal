@@ -33,8 +33,9 @@
 
 
 VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe, 
-        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker)
-    : pslamstate_(pstate), pcurframe_(pframe), pmap_(pmap), ptracker_(ptracker)
+        std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker,
+        std::shared_ptr<ibow_lcd::LCDetector> plcdetector)
+    : pslamstate_(pstate), pcurframe_(pframe), pmap_(pmap), ptracker_(ptracker), plcdetector_(plcdetector)
 {}
 
 bool VisualFrontEnd::visualTracking(cv::Mat &iml, double time)
@@ -77,6 +78,15 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
     if( pcurframe_->id_ == 0 ) {
         return true;
     }
+    // if( pslamstate_->tracking_ == TRACKING::LOST ) {
+    //     if( pslamstate_->do_relocalize_ ) {
+    //         if ( !relocalize() ) return false;
+    //         else pslamstate_->tracking_ = TRACKING::RELOCATING;
+
+    //         motion_model_.updateMotionModel(pcurframe_->Twc_, time);
+    //         return true;
+    //     }
+    // }
     
     // Apply Motion model to predict cur Frame pose
     Sophus::SE3d Twc = pcurframe_->getTwc();
@@ -97,23 +107,75 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
 
     if( pslamstate_->mono_ && !pslamstate_->bvision_init_ ) 
     {
+        // check to initialize by existed map
+        if( pslamstate_->do_track_only_ ) {
+            if( pmap_->nblms_ < 1e3) {
+                std::cout << "[Error] Too few existed map points to relocalize and init\n";
+                exit(1);
+            }
+
+            if( pcurframe_->nb2dkps_ >= 50 ) {
+                if( relocalize() ) {
+                    // Update Motion model from estimated pose
+                    motion_model_.updateMotionModel(pcurframe_->Twc_, time);
+                    // set status
+                    pslamstate_->tracking_ = TRACKING::RELOCATING;
+                    pslamstate_->bvision_init_ = true;
+                    return true;
+                }
+            }
+        }
+
+        // basic initialize
         if( pcurframe_->nb2dkps_ < 50 ) {
             pslamstate_->breset_req_ = true;
+            pslamstate_->tracking_ = TRACKING::RESET;
             return false;
         } 
         else if( checkReadyForInit() ) {
             std::cout << "\n\n - [Visual-Front-End]: Mono Visual SLAM ready for initialization!";
             pslamstate_->bvision_init_ = true;
+            pslamstate_->tracking_ = TRACKING::OK;
             return true;
         } 
         else {
+            pslamstate_->tracking_ = TRACKING::RESET;
             std::cout << "\n\n - [Visual-Front-End]: Not ready to init yet!";
             return false;
         }
     }
 
+    // if too few 3d points, try to relocalize
+    // if( pcurframe_->nb3dkps_ < 10 ) {
+    //     pslamstate_->tracking_ = TRACKING::LOST;
+    //     pslamstate_->block_lc_ = true;
+    //     pslamstate_->rl_cnt = 0;
+    //     return false;
+    //     // if( pslamstate_->do_relocalize_ ) {
+    //     //     if ( !relocalize() ) return false;
+    //     //     else pslamstate_->tracking_ = TRACKING::OK;
+    //     // }
+    // }
+
+
     // Compute Pose (2D-3D)
     computePose();
+
+    // if( pslamstate_->block_lc_ ) {
+    //     if(pslamstate_->rl_cnt++ > 60) {
+    //         pslamstate_->block_lc_ = false;
+    //     }
+    // }
+    // if( pslamstate_->tracking_ == TRACKING::LOST ) {
+    //     size_t retracks = 0;
+    //     auto kps = pcurframe_->getKeypoints();
+    //     for(auto& kp : kps) 
+    //         if(kp.is_retracked_)
+    //             ++retracks;
+    //     if(retracks > 5) {
+    //         pslamstate_->tracking_ = TRACKING::OK;
+    //     }
+    // }
 
     // Update Motion model from estimated pose
     motion_model_.updateMotionModel(pcurframe_->Twc_, time);
@@ -731,7 +793,7 @@ void VisualFrontEnd::computePose()
         success = 
             MultiViewGeometry::p3pRansac(
                             vbvs, vwpts, 
-                            pslamstate_->nransac_iter_, 
+                            10 * pslamstate_->nransac_iter_, 
                             pslamstate_->fransac_err_, 
                             do_optimize, 
                             pslamstate_->bdo_random, 
@@ -747,12 +809,14 @@ void VisualFrontEnd::computePose()
         // Check that pose estim. was good enough
         size_t nbinliers = vwpts.size() - voutliersidx.size();
 
+        std::cout << "\n \t>>> compute pose P3P : " << success << ", inliers: " << nbinliers << ", vwpts: " << vwpts.size() << std::endl;
+
         if( !success
             || nbinliers < 5
             || Twc.translation().array().isInf().any()
             || Twc.translation().array().isNaN().any() )
         {
-            if( pslamstate_->debug_ )
+            if( true || pslamstate_->debug_ )
                 std::cout << "\n \t>>> Not enough inliers for reliable pose est. Resetting KF state\n";
 
             resetFrame();
@@ -803,6 +867,8 @@ void VisualFrontEnd::computePose()
     // Check that pose estim. was good enough
     size_t nbinliers = vwpts.size() - voutliersidx.size();
 
+    // std::cout << "\n \t>>> compute pose PnP : " << success << ", inliers: " << nbinliers << ", vwpts: " << vwpts.size() << std::endl;
+
     if( pslamstate_->debug_ )
         std::cout << "\n \t>>> Ceres PnP nb outliers : " << voutliersidx.size();
 
@@ -818,7 +884,7 @@ void VisualFrontEnd::computePose()
         }
         else if( pslamstate_->mono_ ) {
 
-            if( pslamstate_->debug_ )
+            if( true || pslamstate_->debug_ )
                 std::cout << "\n \t>>> Not enough inliers for reliable pose est. Resetting KF state\n";
 
             resetFrame();
@@ -1146,7 +1212,7 @@ void VisualFrontEnd::preprocessImage(cv::Mat &img_raw)
         Profiler::Start("2.FE_TM_preprocessImage");
 
     // Set cur raw img
-    // left_raw_img_ = img_raw;
+    left_raw_img_ = img_raw;
 
     // Update prev img
     {
@@ -1184,6 +1250,11 @@ void VisualFrontEnd::preprocessImage(cv::Mat &img_raw)
 // Reset current Frame state
 void VisualFrontEnd::resetFrame()
 {
+    // if reseting in OK, then might do relocalization
+    if(pslamstate_->tracking_ == TRACKING::OK) {
+        pslamstate_->tracking_ = TRACKING::LOST;
+    }
+
     auto mapkps = pcurframe_->mapkps_;
     for( const auto &kpit : mapkps ) {
         pmap_->removeObsFromCurFrameById(kpit.first);
@@ -1217,4 +1288,354 @@ void VisualFrontEnd::reset()
     cur_pyr_.clear();
     prev_pyr_.clear();
     kf_pyr_.clear();
+
+    motion_model_.reset();
 }
+
+// static detector
+cv::Ptr<cv::FeatureDetector> vfpfastd_ = cv::FastFeatureDetector::create(20);
+
+#ifdef OPENCV_CONTRIB
+#include <opencv2/xfeatures2d.hpp>
+cv::Ptr<cv::xfeatures2d::BriefDescriptorExtractor> vfpbriefd_  = cv::xfeatures2d::BriefDescriptorExtractor::create();
+#else
+cv::Ptr<cv::DescriptorExtractor> vfpbriefd_  = cv::ORB::create(500, 1., 0);
+#endif
+
+// Relocalize
+bool VisualFrontEnd::relocalize()
+{
+    if(pcurframe_ == nullptr || cur_img_.empty())
+        return false;
+    
+    std::vector<cv::KeyPoint> vcvkps;
+    cv::Mat cvdescs;
+
+    createRelocalizeFrame(vcvkps, cvdescs, true);
+
+    if(cvdescs.empty()) {
+        std::cout << "[RL] No descriptors computed!\n";
+        return false;
+    }
+
+    // found kf bow infomation
+    ibow_lcd::LCDetectorResult result;
+    plcdetector_->process(-1, vcvkps, cvdescs, &result);
+
+    bool success = false;
+
+    if(result.status == ibow_lcd::LC_DETECTED) {
+        success = processRelocalizeCandidate(result.train_id);
+    } else {
+        std::cout << "[RL] cannot found similar KF\n";
+    }
+
+    if( !success ) removeTempMapPoints();
+    
+    return success;
+}
+
+// Process Relocalize Candidate Keyframe
+bool VisualFrontEnd::processRelocalizeCandidate(int kfid) {
+    //// calculate original keypoints and descriptors
+    std::vector<cv::KeyPoint> vcvkps;
+    cv::Mat cvdescs;
+    createRelocalizeFrame(vcvkps, cvdescs);
+    
+    auto pkf = pmap_->getKeyframe(kfid);
+    // If not in the map anymore, get the closest one
+    while( pkf == nullptr ) {
+        kfid--;
+        pkf = pmap_->getKeyframe(kfid);
+    }
+
+    std::cout << "[RL] found similar KF(" << pkf->kfid_ << "), serial id "<< pkf->id_ <<" \n";
+
+    // kNN Matching
+    std::vector<std::pair<int,int>> vkplmids;
+    knnMatch(cvdescs, *pkf, vkplmids);
+    // check knn
+    if(vkplmids.size() < 20) {
+        std::cout << "[Relocalize] Not enough matches found to apply relocalization! (" << vkplmids.size() << ")\n";
+        return false;
+    }
+
+    // reset curframe
+    std::vector<int> vlmids;
+    std::unordered_map<int, cv::Point2f> mlmidps;
+    mlmidps.reserve(vkplmids.size());
+    for(auto& kv : vkplmids) {
+        cv::Point2f pt = vcvkps.at(kv.first).pt;
+        mlmidps.emplace(kv.second, pt);
+        vlmids.push_back(kv.second);
+    }
+    // add matched keypoint
+    resetFrame();
+    for(auto& kv : mlmidps) {
+        pcurframe_->addKeypoint(kv.second, kv.first);
+        pcurframe_->turnKeypoint3d(kv.first);
+        pmap_->setMapPointObs(kv.first);
+    }
+
+    // epipolar filtering
+    std::vector<int> voutliers_idx;
+    bool success = epipolarFiltering(*pkf, vlmids, voutliers_idx);
+    
+    size_t nbinliers = vkplmids.size() - voutliers_idx.size();
+
+    if( !success || nbinliers < 10 ) {
+        if( true || pslamstate_->debug_ )
+            std::cout << "\n Not enough inliers for Relocalization after epipolar filtering\n";
+        return false;
+    }
+
+    // remove outliers
+    removeOutliers(vlmids, voutliers_idx);
+
+    // Do a P3P-Ransac
+    Sophus::SE3d Twc = pcurframe_->getTwc();
+
+    success = p3pRansac(*pkf, vlmids, voutliers_idx, Twc);
+
+    nbinliers = vkplmids.size() - voutliers_idx.size();
+
+    if( !success || nbinliers < 5 ) {
+        if( true ||  pslamstate_->debug_ )
+            std::cout << "\n Not enough inliers (" << nbinliers << ") for relocalization after p3pRansac\n";
+        return false;
+    }
+
+    pcurframe_->setTwc(Twc);
+
+    std::cout << " - [Relocalize] Successfully apply relocalization! \n";
+    return true;
+}
+
+void VisualFrontEnd::knnMatch(const cv::Mat &descs,const Frame& kf, std::vector<std::pair<int,int>> &vkplmids)
+{
+    // Knn Matching
+    std::vector<int> vlmids;
+    // set query
+    cv::Mat query = descs;
+    
+    cv::Mat train;
+    // set training desc
+    for( const auto &kp : kf.getKeypoints3d() ) {
+        auto plm = pmap_->getMapPoint(kp.lmid_);
+        if( plm != nullptr && !plm->desc_.empty() ) {
+            train.push_back(plm->desc_);
+            vlmids.push_back(kp.lmid_);
+        }
+    }
+
+    // opencv knn match
+    cv::BFMatcher matcher(cv::NORM_HAMMING);
+    std::vector<std::vector<cv::DMatch> > vmatches;
+    matcher.knnMatch(query, train, vmatches, 2);
+
+    vkplmids.reserve(vlmids.size());
+
+    // set mapping id
+    const int maxdist = query.cols * 0.5 * 8.;
+
+    for( const auto &m : vmatches ) {
+        if( m.size() < 2 ||  ( m.at(0).distance <= maxdist && m.at(0).distance <= m.at(1).distance * 0.95 ) ) 
+        {
+            int kpid = m.at(0).queryIdx;
+            int lmid = vlmids.at(m.at(0).trainIdx);
+            vkplmids.push_back(std::pair<int,int>(kpid, lmid));
+        }
+    }
+
+}
+
+bool VisualFrontEnd::epipolarFiltering(const Frame& kf, std::vector<int> &vlmids, std::vector<int> &voutliers_idx) {
+    Eigen::Matrix3d R;
+    Eigen::Vector3d t;
+
+    size_t nbkps = vlmids.size();
+
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > vkfbvs, vcurbvs;
+    vkfbvs.reserve(nbkps);
+    vcurbvs.reserve(nbkps);
+    voutliers_idx.reserve(nbkps);
+
+    for( const auto &id : vlmids ) {
+        vcurbvs.push_back(pcurframe_->getKeypointById(id).bv_);
+        vkfbvs.push_back(kf.getKeypointById(id).bv_);
+    }
+
+    bool success = false;
+    
+    try {
+        success = MultiViewGeometry::compute5ptEssentialMatrix(
+            vkfbvs, vcurbvs, 10 * pslamstate_->nransac_iter_, 
+            pslamstate_->fransac_err_, 
+            false, pslamstate_->bdo_random, 
+            kf.pcalib_leftcam_->fx_, 
+            kf.pcalib_leftcam_->fy_, 
+            R, t, 
+            voutliers_idx
+            );
+    } catch (cv::Exception& e) {
+        std::cout << "[VisualFrontEnd] Exception in epipolar filtering : " << e.what() << std::endl;
+        success = false;
+    }
+
+    return success;
+}
+
+void VisualFrontEnd::removeOutliers(std::vector<int> &vlmids, std::vector<int> &voutliers_idx)
+{
+    if( voutliers_idx.empty() ) {
+        return;
+    }
+
+    size_t nbkps = vlmids.size();
+    std::vector<int> vlmidstmp;
+
+    vlmidstmp.reserve(nbkps);
+    
+    size_t j = 0;
+    for( size_t i = 0 ;  i < nbkps ; i++ ) 
+    {
+        if( (int)i != voutliers_idx.at(j) ) {
+            vlmidstmp.push_back(vlmids.at(i));
+        } 
+        else {
+            j++;
+            if( j == voutliers_idx.size() ) {
+                j = 0;
+                voutliers_idx.at(0) = -1;
+            }
+        }
+    }
+
+    vlmids.swap(vlmidstmp);
+
+    voutliers_idx.clear();
+}
+
+bool VisualFrontEnd::p3pRansac(const Frame& kf, std::vector<int> &vlmids, std::vector<int> &voutliers_idx, Sophus::SE3d& Twc) 
+{
+    if( vlmids.size() < 4 ) {
+        return false;
+    }
+
+    std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > vbvs, vwpts;
+
+    std::vector<int> vkpids;
+
+    size_t nbkps = vlmids.size();
+
+    vbvs.reserve(nbkps);
+    vwpts.reserve(nbkps);
+    voutliers_idx.reserve(nbkps);
+
+    std::vector<int> vbadidx;
+
+    for( size_t i = 0 ; i < nbkps ; i++ ){
+        int lmid = vlmids.at(i);
+
+        auto plm = pmap_->getMapPoint(lmid);
+        if( plm == nullptr ) {
+            vbadidx.push_back(i);
+            continue;
+        }
+
+        auto kp = kf.getKeypointById(lmid);
+
+        vwpts.push_back(plm->getPoint());
+        vbvs.push_back(kp.bv_);
+    }
+
+    int k = 0;
+    for( const auto &badidx : vbadidx ) {
+        vlmids.erase(vlmids.begin() + badidx-k);
+        k++;
+    }
+
+    if( vbvs.size() < 4 ) {
+        if( pslamstate_->debug_ )
+            std::cout << "\n Not enough pts for p3p\n!";
+        return false;
+    }
+
+    bool do_optimize = true;
+
+    bool success = 
+            MultiViewGeometry::p3pRansac(
+                vbvs, vwpts, 10 * pslamstate_->nransac_iter_, 
+                pslamstate_->fransac_err_, 
+                do_optimize, pslamstate_->bdo_random, 
+                kf.pcalib_leftcam_->fx_, 
+                kf.pcalib_leftcam_->fy_, 
+                Twc, voutliers_idx
+                );
+    
+    if( pslamstate_->debug_ )
+        std::cout << "\n P3P RANSAC FOR RELOCALIZATION : " << voutliers_idx.size() 
+            << " outliers / tot " << nbkps << " 2D / 3D matches\n";
+
+    return success;
+}
+
+void VisualFrontEnd::createRelocalizeFrame(std::vector<cv::KeyPoint>& vcvkps, cv::Mat& cvdescs, bool extra_pts) 
+{
+    if(pcurframe_ == nullptr || cur_img_.empty())
+        return;
+    cv::Mat imraw = left_raw_img_;
+
+    resetFrame();
+    pcurframe_->map_covkfs_.clear();
+    pcurframe_->set_local_mapids_.clear();
+
+    pmap_->extractKeypoints(imraw, cur_img_);
+
+    // set values
+    vcvkps.clear();
+    cvdescs = cv::Mat();
+
+    auto vkps = pcurframe_->getKeypoints();
+    vcvkps.reserve(vkps.size() + (extra_pts ? 300 : 0) );
+
+    cv::Mat mask = cv::Mat(imraw.rows, imraw.cols, CV_8UC1, cv::Scalar(255));
+
+    // set original mask
+    for( const auto &kp : vkps ) {
+        vcvkps.push_back(cv::KeyPoint(kp.px_, 5., kp.angle_, 1., kp.scale_));
+        cv::circle(mask, kp.px_, 2., 0, -1);
+    }
+
+    // compute descriptors
+    vfpbriefd_->compute(imraw, vcvkps, cvdescs);
+
+    if( extra_pts ) {
+        std::vector<cv::KeyPoint> vaddkps;
+        vfpfastd_->detect(imraw, vaddkps, mask);
+
+        if( !vaddkps.empty() ){
+            cv::KeyPointsFilter::retainBest(vaddkps, 300);
+
+            cv::Mat adddescs;
+            vfpbriefd_->compute(cur_img_, vaddkps, cvdescs);
+            
+            if( !adddescs.empty() ) {
+                vcvkps.insert(vcvkps.end(), vaddkps.begin(), vaddkps.end());
+                cv::vconcat(cvdescs, adddescs, cvdescs);
+            }
+        }
+    }
+}
+
+void VisualFrontEnd::removeTempMapPoints()
+{
+    if( pcurframe_ == nullptr )
+        return;
+    
+    auto vkps = pcurframe_->getKeypoints();
+    for(auto& kp : vkps) 
+        pmap_->removeMapPoint(kp.lmid_);
+}
+
+

@@ -30,9 +30,7 @@
 #include <deque>
 
 
-#ifdef IBOW_LCD
 #include <ibow_lcd/lcdetector.h>
-#endif
 
 #include "map_manager.hpp"
 #include "optimizer.hpp"
@@ -42,7 +40,7 @@ class LoopCloser {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    LoopCloser(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap);
+    LoopCloser(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, std::shared_ptr<ibow_lcd::LCDetector> plcdetector);
 
     void run();
     void reset();
@@ -69,10 +67,9 @@ public:
 
     void addNewKf(const std::shared_ptr<Frame> &pkf, const cv::Mat &im);
 
-#ifdef IBOW_LCD
-    ibow_lcd::LCDetectorParams lcparams_; 
-    ibow_lcd::LCDetector lcdetetector_;
-#endif
+    // ibow_lcd::LCDetectorParams lcparams_; 
+    // ibow_lcd::LCDetector lcdetetector_;
+    std::shared_ptr<ibow_lcd::LCDetector> plcdetector_;
 
     std::shared_ptr<SlamParams> pslamstate_;
     std::shared_ptr<MapManager> pmap_;

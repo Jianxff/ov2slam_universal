@@ -43,30 +43,28 @@
 cv::Ptr<cv::FeatureDetector> pfastd_ = cv::FastFeatureDetector::create(20);
 
 
-#ifdef IBOW_LCD
-LoopCloser::LoopCloser(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap)
-    : lcparams_()
-    , lcdetetector_(lcparams_), pslamstate_(pslamstate), pmap_(pmap)
+LoopCloser::LoopCloser(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap,
+        std::shared_ptr<ibow_lcd::LCDetector> plcdetector)
+    : plcdetector_(plcdetector), pslamstate_(pslamstate), pmap_(pmap)
     , poptimizer_( new Optimizer(pslamstate_, pmap_) )
 {
     std::cout << "\n LoopCloser Object is created!\n";
 
-    vkfids_.reserve(5000);
+    // vkfids_.reserve(5000);
 }
-#else
-LoopCloser::LoopCloser(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap)
-    : pslamstate_(pslamstate), pmap_(pmap)
-    , poptimizer_( new Optimizer(pslamstate_, pmap_) )
-{
-    std::cout << "\n LoopCloser won't be used!\n";
-}
-#endif
+
+// LoopCloser::LoopCloser(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap)
+//     : pslamstate_(pslamstate), pmap_(pmap)
+//     , poptimizer_( new Optimizer(pslamstate_, pmap_) )
+// {
+//     std::cout << "\n LoopCloser won't be used!\n";
+// }
+
 
 void LoopCloser::run()
 {
-#ifdef IBOW_LCD
     std::cout << "\n Use LoopCLoser : " << pslamstate_->buse_loop_closer_;
-    if( !pslamstate_->buse_loop_closer_ ) {
+    if( !pslamstate_->buse_loop_closer_ || pslamstate_->do_track_only_ ) {
         return;
     }
 
@@ -144,11 +142,12 @@ void LoopCloser::run()
             }
 
             // Send proc. KF to LC Detector
-            kf_idx_++;
-            vkfids_.push_back(pnewkf_->kfid_);
+            // kf_idx_++;
+            // vkfids_.push_back(pnewkf_->kfid_);
 
             ibow_lcd::LCDetectorResult result;
-            lcdetetector_.process(kf_idx_, vcvkps, cvdescs, &result);
+            //plcdetector_->process(kf_idx_, vcvkps, cvdescs, &result);
+            plcdetector_->process(pnewkf_->kfid_, vcvkps, cvdescs, &result);
             
             if( pslamstate_->debug_ || pslamstate_->log_timings_ )
                 Profiler::StopAndDisplay(pslamstate_->debug_, "0.LC_ProcessKF");
@@ -175,16 +174,16 @@ void LoopCloser::run()
     }
     std::cout << "\n LoopCloser is stopping!\n";
 
-#else
-    return;
-#endif
+
+    // return;
 }
 
 
 void LoopCloser::processLoopCandidate(int kfloopidx)
 {
     // Get the KF stored in the vector of processed KF
-    int kfid = vkfids_.at(kfloopidx);
+    // int kfid = vkfids_.at(kfloopidx);
+    int kfid = kfloopidx;
 
     auto plckf = pmap_->getKeyframe(kfid);
 
@@ -479,7 +478,8 @@ bool LoopCloser::epipolarFiltering(const Frame &newkf, const Frame &lckf, std::v
         vlcbvs.push_back(lckp.bv_);
     }
 
-    bool success = 
+    bool success = false;
+    try {
         MultiViewGeometry::compute5ptEssentialMatrix(
             vlcbvs, vcurbvs, 10 * pslamstate_->nransac_iter_, 
             pslamstate_->fransac_err_, 
@@ -489,7 +489,10 @@ bool LoopCloser::epipolarFiltering(const Frame &newkf, const Frame &lckf, std::v
             R, t, 
             voutliers_idx
             );
-
+    } catch (cv::Exception& e) {
+        std::cout << "[LoopCloser] Exception in epipolar filtering : " << e.what() << std::endl;
+        success = false;
+    }
 
     if( pslamstate_->debug_ )
         std::cout << "\n 2D-2D Epipolar outliers #" << voutliers_idx.size() 

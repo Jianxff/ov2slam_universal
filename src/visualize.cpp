@@ -24,7 +24,7 @@ void Visualize::run() {
 
   // Add named OpenGL viewport to window and provide 3D Handler
   pangolin::View& d_cam = pangolin::CreateDisplay()
-          .SetBounds(0.0, 1.0, pangolin::Attach::Pix(175), 1.0, -1024.0f/768.0f)
+          .SetBounds(0.0, 1.0, 0.0, 1.0, -1024.0f/768.0f)
           .SetHandler(new pangolin::Handler3D(s_cam));
 
   Twc_.SetIdentity();

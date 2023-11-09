@@ -30,6 +30,8 @@
 #include <vector>
 #include <unordered_set>
 
+#include <ibow_lcd/lcdetector.h>
+
 #include "map_manager.hpp"
 #include "multi_view_geometry.hpp"
 #include "optimizer.hpp"
@@ -90,7 +92,7 @@ public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     Mapper() {}
-    Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, std::shared_ptr<Frame> pframe);
+    Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, std::shared_ptr<Frame> pframe, std::shared_ptr<ibow_lcd::LCDetector> plcdetector);
 
     void run();
 
