@@ -30,7 +30,7 @@
 #include <iterator>
 
 #include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp> 
+// #include <opencv2/highgui.hpp> 
 
 #ifdef OPENCV_CONTRIB
 #include <opencv2/xfeatures2d.hpp>

@@ -33,14 +33,17 @@ Mapper::Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManage
             std::shared_ptr<Frame> pframe)
     : pslamstate_(pslamstate), pmap_(pmap), pcurframe_(pframe)
     , pestimator_( new Estimator(pslamstate_, pmap_) )
-    , ploopcloser_( new LoopCloser(pslamstate_, pmap_) )
 {
-    std::thread mapper_thread(&Mapper::run, this);
-    mapper_thread.detach();
 
+// #ifdef MULTI_THREAD
+//     thread_handle = std::thread(&Mapper::run, this);
+//     // std::thread mapper_thread(&Mapper::run, this);
+//     // mapper_thread.detach();
+// #endif
     std::cout << "\nMapper Object is created!\n";
 }
 
+#ifdef MULTI_THREAD
 void Mapper::run()
 {
     std::cout << "\nMapper is ready to process Keyframes!\n";
@@ -48,7 +51,6 @@ void Mapper::run()
     Keyframe kf;
 
     std::thread estimator_thread(&Estimator::run, pestimator_);
-    std::thread lc_thread(&LoopCloser::run, ploopcloser_);
 
     while( !bexit_required_ ) {
 
@@ -58,51 +60,9 @@ void Mapper::run()
                 std::cout << "\n\n - [Mapper (back-End)]: New KF to process : KF #" 
                     << kf.kfid_ << "\n";
 
-            if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-                Profiler::Start("0.Keyframe-Processing_Mapper");
-
             // Get new KF ptr
             std::shared_ptr<Frame> pnewkf = pmap_->getKeyframe(kf.kfid_);
             assert( pnewkf );
-
-            // Triangulate stereo
-            if( pslamstate_->stereo_ ) 
-            {
-                if( pslamstate_->debug_ )
-                    std::cout << "\n\n - [Mapper (back-End)]: Applying stereo matching!\n";
-
-                cv::Mat imright;
-                if( pslamstate_->use_clahe_ ) {
-                    pmap_->ptracker_->pclahe_->apply(kf.imrightraw_, imright);
-                } else {
-                    imright = kf.imrightraw_;
-                }
-                std::vector<cv::Mat> vpyr_imright;
-                cv::buildOpticalFlowPyramid(imright, vpyr_imright, pslamstate_->klt_win_size_, pslamstate_->nklt_pyr_lvl_);
-
-                pmap_->stereoMatching(*pnewkf, kf.vpyr_imleft_, vpyr_imright);
-                
-                if( pnewkf->nb2dkps_ > 0 && pnewkf->nb_stereo_kps_ > 0 ) {
-                    
-                    if( pslamstate_->debug_ ) {
-                        std::cout << "\n\n - [Mapper (back-End)]: Stereo Triangulation!\n";
-
-                        std::cout << "\n\n  \t >>> (BEFORE STEREO TRIANGULATION) New KF nb 2d kps / 3d kps / stereokps : ";
-                        std::cout << pnewkf->nb2dkps_ << " / " << pnewkf->nb3dkps_ 
-                            << " / " << pnewkf->nb_stereo_kps_ << "\n";
-                    }
-
-                    std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
-
-                    triangulateStereo(*pnewkf);
-
-                    if( pslamstate_->debug_ ) {
-                        std::cout << "\n\n  \t >>> (AFTER STEREO TRIANGULATION) New KF nb 2d kps / 3d kps / stereokps : ";
-                        std::cout << pnewkf->nb2dkps_ << " / " << pnewkf->nb3dkps_ 
-                            << " / " << pnewkf->nb_stereo_kps_ << "\n";
-                    }
-                }
-            }
 
             // Triangulate temporal
             if( pnewkf->nb2dkps_ > 0 && pnewkf->kfid_ > 0 ) 
@@ -126,7 +86,7 @@ void Mapper::run()
             }
 
             // If Mono mode, check if reset is required
-            if( pslamstate_->mono_ && pslamstate_->bvision_init_ ) 
+            if( pslamstate_->bvision_init_ ) 
             {
                 if( kf.kfid_ == 1 && pnewkf->nb3dkps_ < 30 ) {
                     std::cout << "\n Bad initialization detected! Resetting\n";
@@ -165,12 +125,6 @@ void Mapper::run()
             pestimator_->addNewKf(pnewkf);
 
             // Send KF along with left image to LC thread
-            if( pslamstate_->buse_loop_closer_ ) {
-                ploopcloser_->addNewKf(pnewkf, kf.imleftraw_);
-            }
-
-            if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "0.Keyframe-Processing_Mapper");
 
         } else {
             std::chrono::microseconds dura(100);
@@ -179,20 +133,100 @@ void Mapper::run()
     }
 
     pestimator_->bexit_required_ = true;
-    ploopcloser_->bexit_required_ = true;
 
     estimator_thread.join();
-    lc_thread.join();
     
     std::cout << "\nMapper is stopping!\n";
 }
 
+#else
+
+void Mapper::step() 
+{
+    Keyframe kf;
+
+    if( getNewKf(kf) ) 
+    {
+        if( pslamstate_->debug_ )
+            std::cout << "\n\n - [Mapper (back-End)]: New KF to process : KF #" 
+                << kf.kfid_ << "\n";
+
+        // Get new KF ptr
+        std::shared_ptr<Frame> pnewkf = pmap_->getKeyframe(kf.kfid_);
+        assert( pnewkf );
+
+        // Triangulate temporal
+        if( pnewkf->nb2dkps_ > 0 && pnewkf->kfid_ > 0 ) 
+        {
+            if( pslamstate_->debug_ ) {
+                std::cout << "\n\n - [Mapper (back-End)]: Temporal Triangulation!\n";
+
+                std::cout << "\n\n  \t >>> (BEFORE TEMPORAL TRIANGULATION) New KF nb 2d kps / 3d kps / stereokps : ";
+                std::cout << pnewkf->nb2dkps_ << " / " << pnewkf->nb3dkps_ 
+                    << " / " << pnewkf->nb_stereo_kps_ << "\n";
+            }
+
+            std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
+            
+            triangulateTemporal(*pnewkf);
+            
+            if( pslamstate_->debug_ ) {
+                std::cout << "\n\n  \t >>> (AFTER TEMPORAL TRIANGULATION) New KF nb 2d kps / 3d kps / stereokps : ";
+                std::cout << pnewkf->nb2dkps_ << " / " << pnewkf->nb3dkps_ << " / " << pnewkf->nb_stereo_kps_ << "\n";
+            }
+        }
+
+        // If Mono mode, check if reset is required
+        if( pslamstate_->bvision_init_ ) 
+        {
+            if( kf.kfid_ == 1 && pnewkf->nb3dkps_ < 30 ) {
+                std::cout << "\n Bad initialization detected! Resetting\n";
+                pslamstate_->breset_req_ = true;
+                reset();
+                return;
+            } 
+            else if( kf.kfid_ < 10 && pnewkf->nb3dkps_ < 3 ) {
+                std::cout << "\n Reset required : Nb 3D kps #" 
+                        << pnewkf->nb3dkps_;
+                pslamstate_->breset_req_ = true;
+                reset();
+                return;
+            }
+        }
+
+        // Update the MPs and the covisilbe graph between KFs
+        // (done here for real-time performance reason)
+        pmap_->updateFrameCovisibility(*pnewkf);
+
+        // Dirty but useful for visualization
+        pcurframe_->map_covkfs_ = pnewkf->map_covkfs_;
+
+        if( pslamstate_->use_brief_ && kf.kfid_ > 0 
+            && !bnewkfavailable_ ) 
+        {
+            if( pslamstate_->bdo_track_localmap_ )
+            {
+                if( pslamstate_->debug_ )
+                    std::cout << "\n\n - [Mapper (back-End)]: matchingToLocalMap()!\n";
+                matchingToLocalMap(*pnewkf);
+            }
+        }
+
+        // Send new KF to estimator for BA
+        pestimator_->addNewKf(pnewkf);
+        pestimator_->step();
+
+        // Send KF along with left image to LC thread
+
+    }
+
+}
+
+#endif
+
 
 void Mapper::triangulateTemporal(Frame &frame)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.KF_TriangulateTemporal");
-
     // Get New KF kps / pose
     std::vector<Keypoint> vkps = frame.getKeypoints2d();
 
@@ -282,11 +316,6 @@ void Mapper::triangulateTemporal(Frame &frame)
 
             relkfid = kfid;
         }
-
-        // If no motion between both KF, skip
-        if( pslamstate_->stereo_ && Tcicj.translation().norm() < 0.01 ) {
-            continue;
-        }
         
         // Get obs kp
         Keypoint kfkp = pkf->getKeypointById(vkps.at(i).lmid_);
@@ -338,16 +367,10 @@ void Mapper::triangulateTemporal(Frame &frame)
     if( pslamstate_->debug_ )
         std::cout << "\n \t >>> Temporal Mapping : " << good << " 3D MPs out of " 
             << candidates << " kps !\n";
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.KF_TriangulateTemporal");
 }
 
 void Mapper::triangulateStereo(Frame &frame)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.KF_TriangulateStereo");
-
     // INIT STEREO TRIANGULATE
     std::vector<Keypoint> vkps;
 
@@ -407,22 +430,8 @@ void Mapper::triangulateStereo(Frame &frame)
     {
         kpidx = vstereoidx.at(i);
 
-        if( pslamstate_->bdo_stereo_rect_ ) {
-            float disp = vkps.at(kpidx).unpx_.x - vkps.at(kpidx).runpx_.x;
-
-            if( disp < 0. ) {
-                frame.removeStereoKeypointById(vkps.at(kpidx).lmid_);
-                continue;
-            }
-
-            float z = frame.pcalib_leftcam_->fx_ * frame.pcalib_rightcam_->Tcic0_.translation().norm() / fabs(disp);
-
-            left_pt << vkps.at(kpidx).unpx_.x, vkps.at(kpidx).unpx_.y, 1.;
-            left_pt = z * frame.pcalib_leftcam_->iK_ * left_pt.eval();
-        } else {
-            // Triangulate in left cam frame
-            left_pt = computeTriangulation(Tlr, vleftbvs.at(i), vrightbvs.at(i));
-        }
+        // Triangulate in left cam frame
+        left_pt = computeTriangulation(Tlr, vleftbvs.at(i), vrightbvs.at(i));
 
         // Project into right cam frame
         right_pt = Trl * left_pt;
@@ -455,9 +464,6 @@ void Mapper::triangulateStereo(Frame &frame)
     if( pslamstate_->debug_ )
         std::cout << "\n \t >>> Stereo Mapping : " << good << " 3D MPs out of " 
             << nbstereo << " kps !\n";
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.KF_TriangulateStereo");
 }
 
 inline Eigen::Vector3d Mapper::computeTriangulation(const Sophus::SE3d &T, const Eigen::Vector3d &bvl, const Eigen::Vector3d &bvr)
@@ -468,9 +474,6 @@ inline Eigen::Vector3d Mapper::computeTriangulation(const Sophus::SE3d &T, const
 
 bool Mapper::matchingToLocalMap(Frame &frame)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.KF_MatchingToLocalMap");
-
     // Maximum number of MPs to track
     const size_t nmax_localplms = pslamstate_->nbmaxkps_ * 10;
 
@@ -542,14 +545,12 @@ bool Mapper::matchingToLocalMap(Frame &frame)
         return false;
     }
 
-    // Merge in a thread to avoid waiting for BA to finish
-    // mergeMatches(frame, map_previd_newid);
-    std::thread thread(&Mapper::mergeMatches, this, std::ref(frame), map_previd_newid);
-    thread.detach();
+    // // Merge in a thread to avoid waiting for BA to finish
+    // std::thread thread(&Mapper::mergeMatches, this, std::ref(frame), map_previd_newid);
+    // thread.detach();
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.KF_MatchingToLocalMap");
-        
+    mergeMatches(std::ref(frame), map_previd_newid);
+
     return true;
 }
 

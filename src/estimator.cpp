@@ -24,10 +24,10 @@
 *             Martial Sanfourche <first.last at onera dot fr>      (ONERA, DTIS - IVA)
 */
 
-#include <thread>
-
 #include "estimator.hpp"
 
+#ifdef MULTI_THREAD
+#include <thread>
 
 void Estimator::run()
 {
@@ -37,19 +37,12 @@ void Estimator::run()
 
         if( getNewKf() ) 
         {
-            if( pslamstate_->slam_mode_ ) 
-            {
-                if( pslamstate_->debug_ )
+            if( pslamstate_->debug_ )
                     std::cout << "\n [Estimator] Slam-Mode - Processing new KF #" << pnewkf_->kfid_;
 
-                applyLocalBA();
+            applyLocalBA();
 
-                mapFiltering();
-
-            } else {
-                if( pslamstate_->debug_ )
-                    std::cout << "\nNO OPITMIZATION (NEITHER SLAM MODE NOR SW MODE SELECTED) !\n";
-            }
+            mapFiltering();
         } else {
             std::chrono::microseconds dura(20);
             std::this_thread::sleep_for(dura);
@@ -63,13 +56,26 @@ void Estimator::run()
     std::cout << "\n Estimator thread is exiting.\n";
 }
 
+#else
+
+void Estimator::step()
+{
+    if( getNewKf() ) 
+    {
+        if( pslamstate_->debug_ )
+                std::cout << "\n [Estimator] Slam-Mode - Processing new KF #" << pnewkf_->kfid_;
+
+        applyLocalBA();
+
+        mapFiltering();
+    }
+}
+
+#endif
 
 void Estimator::applyLocalBA()
 {
-    int nmincstkfs = 1;
-    if( pslamstate_->mono_ ) {
-        nmincstkfs = 2;
-    }
+    int nmincstkfs = 2;
 
     if( pnewkf_->kfid_ < nmincstkfs ) {
         return;
@@ -78,9 +84,6 @@ void Estimator::applyLocalBA()
     if( pnewkf_->nb3dkps_ == 0 ) {
         return;
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.BA_localBA");
 
     std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
 
@@ -92,9 +95,6 @@ void Estimator::applyLocalBA()
 
     // We signal that Estimator is stopping BA
     pslamstate_->blocalba_is_on_ = false;
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.BA_localBA");
 }
 
 
@@ -104,12 +104,9 @@ void Estimator::mapFiltering()
         return;
     }
     
-    if( pnewkf_->kfid_ < 20 || pslamstate_->blc_is_on_ ) {
+    if( pnewkf_->kfid_ < 20 ) {
         return;
     }   
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.BA_map-filtering");
         
     auto covkf_map = pnewkf_->getCovisibleKfMap();
 
@@ -122,11 +119,6 @@ void Estimator::mapFiltering()
         }
 
         if( kfid >= pnewkf_->kfid_ ) {
-            continue;
-        }
-
-        // Only useful if LC enabled
-        if( pslamstate_->lckfid_ == kfid ) {
             continue;
         }
 
@@ -169,17 +161,10 @@ void Estimator::mapFiltering()
         float ratio = (float)nbgoodobs / nbtot;
         if( ratio > pslamstate_->fkf_filtering_ratio_ ) {
 
-            // Only useful if LC enabled
-            if( pslamstate_->lckfid_ == kfid ) {
-                continue;
-            }
             std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
             pmap_->removeKeyframe(kfid);
         }
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.BA_map-filtering");
 }
 
 bool Estimator::getNewKf()

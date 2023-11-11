@@ -44,7 +44,12 @@ public:
         std::cout << "\n Estimator Object is created!\n";
     }
 
+#ifdef MULTI_THREAD
     void run();
+#else
+    void step();
+#endif
+
     void reset();
 
     void processKeyframe();

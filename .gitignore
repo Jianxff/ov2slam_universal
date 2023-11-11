@@ -1,16 +1,4 @@
 .*
-!.babelrc
 !.gitignore
-!.prettierrc
-!.editorconfig
-!.eslintrc.json
-!.prettierrc
-!.eslintignore
-!.buildpacks
 **/build
 **/install
-
-node_modules
-__pycache__
-
-build/*

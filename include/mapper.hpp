@@ -34,7 +34,6 @@
 #include "multi_view_geometry.hpp"
 #include "optimizer.hpp"
 #include "estimator.hpp"
-#include "loop_closer.hpp"
 
 struct Keyframe {
     int kfid_;
@@ -92,7 +91,11 @@ public:
     Mapper() {}
     Mapper(std::shared_ptr<SlamParams> pslamstate, std::shared_ptr<MapManager> pmap, std::shared_ptr<Frame> pframe);
 
+#ifdef MULTI_THREAD
     void run();
+#else
+    void step();
+#endif
 
     bool matchingToLocalMap(Frame &frame);
     std::map<int,int> matchToMap(const Frame &frame, const float fmaxprojerr, const float fdistratio, std::unordered_set<int> &set_local_lmids);
@@ -122,13 +125,11 @@ public:
     std::shared_ptr<Frame> pcurframe_;
 
     std::shared_ptr<Estimator> pestimator_;
-    std::shared_ptr<LoopCloser> ploopcloser_;
 
     bool bnewkfavailable_ = false;
     bool bwaiting_for_lc_ = false;
     bool bexit_required_ = false; 
 
     std::queue<Keyframe> qkfs_;
-
     std::mutex qkf_mutex_;
 };

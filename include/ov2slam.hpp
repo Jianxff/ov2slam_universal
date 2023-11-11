@@ -32,8 +32,6 @@
 
 #include "slam_params.hpp"
 
-#include "logger.hpp"
-
 #include "camera_calibration.hpp"
 #include "feature_extractor.hpp"
 #include "feature_tracker.hpp"
@@ -51,24 +49,23 @@ public:
 
     SlamManager(std::shared_ptr<SlamParams> pstate);
 
+#ifdef MULTI_THREAD
     void run();
+#else 
+    void step();
+#endif
 
-    bool getNewImage(cv::Mat &iml, cv::Mat &imr, double &time);
+    void stop();
 
-    void addNewStereoImages(const double time, cv::Mat &im0, cv::Mat &im1);
+    bool getNewImage(cv::Mat &im, double &time);
+
     void addNewMonoImage(const double time, cv::Mat &im0);
 
     void setupCalibration();
-    void setupStereoCalibration();
     
     void reset();
 
     cv::Mat visualFrame();
-
-    void writeResults();
-
-    void writeFullTrajectoryLC();
-
 
     int frame_id_ = -1;
     bool bnew_img_available_ = false;
@@ -82,19 +79,18 @@ public:
     std::shared_ptr<SlamParams> pslamstate_;
 
     std::shared_ptr<CameraCalibration> pcalib_model_left_;
-    std::shared_ptr<CameraCalibration> pcalib_model_right_;
 
     std::shared_ptr<Frame> pcurframe_;
 
     std::shared_ptr<MapManager> pmap_;
 
     std::unique_ptr<VisualFrontEnd> pvisualfrontend_;
-    std::unique_ptr<Mapper> pmapper_;
+    std::shared_ptr<Mapper> pmapper_;
 
     std::shared_ptr<FeatureExtractor> pfeatextract_;
     std::shared_ptr<FeatureTracker> ptracker_;
 
-    std::queue<cv::Mat> qimg_left_, qimg_right_;
+    std::queue<cv::Mat> qimg_;
     std::queue<double> qimg_time_;
 
     std::mutex img_mutex_;

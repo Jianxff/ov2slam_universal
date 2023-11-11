@@ -39,8 +39,6 @@
 #include <opencv2/core.hpp>
 #include <opencv2/core/eigen.hpp>
 
-#include "profiler.hpp"
-
 class SlamParams {
 
 public:
@@ -50,6 +48,8 @@ public:
     
     SlamParams(const cv::FileStorage &fsSettings);
 
+    SlamParams(int imwidth, int imheight, int fov = 70, bool accurate = true);
+
     void reset();
 
     //=====================================================
@@ -57,7 +57,6 @@ public:
     //=====================================================
 
     bool blocalba_is_on_ = false;
-    bool blc_is_on_ = false;
     bool bvision_init_ = false;
     bool breset_req_ = false;
     bool bforce_realtime_ = false;
@@ -67,34 +66,21 @@ public:
     //=====================================================
 
     // Calibration parameters (TODO: Get Ready to store all of these in a vector to handle N camera)
-    std::string cam_left_topic_, cam_right_topic_;
-    std::string cam_left_model_, cam_right_model_;
+    std::string cam_left_topic_, cam_left_model_;
 
     double fxl_, fyl_, cxl_, cyl_;
     double k1l_, k2l_, p1l_, p2l_;
 
-    double fxr_, fyr_, cxr_, cyr_;
-    double k1r_, k2r_, p1r_, p2r_;
-
     double img_left_w_, img_left_h_;
-    double img_right_w_, img_right_h_;
 
     // Extrinsic parameters
     Sophus::SE3d T_left_right_;
 
     // SLAM settings
-    bool debug_, log_timings_;
-
-    bool mono_, stereo_;
-
-    bool slam_mode_;
-
-    bool buse_loop_closer_;
-    int lckfid_ = -1;
+    bool debug_;
 
     float finit_parallax_;
     
-    bool bdo_stereo_rect_;
     double alpha_;
 
     bool bdo_undist_;
@@ -143,7 +129,6 @@ public:
     // Bundle Adjustment Parameters
     // (mostly related to Ceres options)
     float robust_mono_th_;
-    float robust_stereo_th_;
 
     bool use_sparse_schur_; // If False, Dense Schur used
     bool use_dogleg_; // If False, Lev.-Marq. used
@@ -157,7 +142,4 @@ public:
 
     // Map Filtering parameters
     float fkf_filtering_ratio_;
-
-    // Final BA
-    bool do_full_ba_;
 };

@@ -29,8 +29,6 @@
 #include "visual_front_end.hpp"
 #include "multi_view_geometry.hpp"
 
-#include <opencv2/highgui.hpp>
-
 
 VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame> pframe, 
         std::shared_ptr<MapManager> pmap, std::shared_ptr<FeatureTracker> ptracker)
@@ -40,9 +38,6 @@ VisualFrontEnd::VisualFrontEnd(std::shared_ptr<SlamParams> pstate, std::shared_p
 bool VisualFrontEnd::visualTracking(cv::Mat &iml, double time)
 {
     std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("0.Full-Front_End");
 
     bool iskfreq = trackMono(iml, time);
 
@@ -54,9 +49,6 @@ bool VisualFrontEnd::visualTracking(cv::Mat &iml, double time)
         }
     }
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "0.Full-Front_End");
-
     return iskfreq;
 }
 
@@ -66,9 +58,6 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
 {
     if( pslamstate_->debug_ )
         std::cout << "\n\n - [Visual-Front-End]: Track Mono Image\n";
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.FE_Track-Mono");
 
     // Preprocess the new image
     preprocessImage(im);
@@ -95,7 +84,7 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
         epipolar2d2dFiltering();
     }
 
-    if( pslamstate_->mono_ && !pslamstate_->bvision_init_ ) 
+    if( !pslamstate_->bvision_init_ ) 
     {
         if( pcurframe_->nb2dkps_ < 50 ) {
             pslamstate_->breset_req_ = true;
@@ -121,9 +110,6 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
     // Check if New KF req.
     bool is_kf_req = checkNewKfReq();
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.FE_Track-Mono");
-
     return is_kf_req;
 }
 
@@ -131,8 +117,6 @@ bool VisualFrontEnd::trackMono(cv::Mat &im, double time)
 // KLT Tracking with motion prior
 void VisualFrontEnd::kltTracking()
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_TM_KLT-Tracking");
 
     // Get current kps and init priors for tracking
     std::vector<int> v3dkpids, vkpids;
@@ -269,17 +253,11 @@ void VisualFrontEnd::kltTracking()
             std::cout << " out of " << nbkps << " kps tracked!\n";
         }
     } 
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_TM_KLT-Tracking");
 }
 
 
 void VisualFrontEnd::kltTrackingFromKF()
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_TM_KLT-Tracking-from-KF");
-
     // Get current kps and init priors for tracking
     std::vector<int> v3dkpids, vkpids;
     std::vector<cv::Point2f> v3dkps, v3dpriors, vkps, vpriors;
@@ -436,18 +414,12 @@ void VisualFrontEnd::kltTrackingFromKF()
             std::cout << " out of " << nbkps << " kps tracked!\n";
         }
     } 
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_TM_KLT-Tracking");
 }
 
 
 // This function apply a 2d-2d based outliers filtering
 void VisualFrontEnd::epipolar2d2dFiltering()
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_TM_EpipolarFiltering");
-    
     // Get prev. KF (direct access as Front-End is thread safe)
     auto pkf = pmap_->map_pkfs_.at(pcurframe_->kfid_);
 
@@ -481,9 +453,6 @@ void VisualFrontEnd::epipolar2d2dFiltering()
     // use only them for computing E with RANSAC, 2d kps are then removed based
     // on the resulting Fundamental Mat.
     bool epifrom3dkps = false;
-    if( pslamstate_->stereo_ && pcurframe_->nb3dkps_ > 30 ) {
-        epifrom3dkps = true;
-    }
 
     // Compute rotation compensated parallax
     Eigen::Matrix3d Rkfcur = pkf->getRcw() * pcurframe_->getRwc();
@@ -537,8 +506,7 @@ void VisualFrontEnd::epipolar2d2dFiltering()
     bool do_optimize = false;
 
     // In monocular case, we'll use the resulting motion if tracking is poor
-    if( pslamstate_->mono_ && pmap_->nbkfs_ > 2 
-        && pcurframe_->nb3dkps_ < 30 ) 
+    if( pmap_->nbkfs_ > 2 && pcurframe_->nb3dkps_ < 30 ) 
     {
         do_optimize = true;
     }
@@ -650,17 +618,11 @@ void VisualFrontEnd::epipolar2d2dFiltering()
         if( pslamstate_->debug_ )
             std::cout << "\n Nb of 2d kps removed : " << vbadkpids.size() << " \n";
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_TM_EpipolarFiltering");
 }
 
 
 void VisualFrontEnd::computePose()
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_TM_computePose");
-
     // Get cur nb of 3D kps    
     size_t nb3dkps = pcurframe_->nb3dkps_;
 
@@ -816,7 +778,7 @@ void VisualFrontEnd::computePose()
             // Weird results, skipping here and applying p3p next
             bp3preq_ = true;
         }
-        else if( pslamstate_->mono_ ) {
+        else {
 
             if( pslamstate_->debug_ )
                 std::cout << "\n \t>>> Not enough inliers for reliable pose est. Resetting KF state\n";
@@ -845,9 +807,6 @@ void VisualFrontEnd::computePose()
         // MapManager is responsible for all removing operations
         pmap_->removeObsFromCurFrameById(vkpids.at(idx));
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_TM_computePose");
 }
 
 
@@ -985,9 +944,6 @@ bool VisualFrontEnd::checkReadyForInit()
 
 bool VisualFrontEnd::checkNewKfReq()
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_TM_checkNewKfReq");
-
     // Get prev. KF
     auto pkfit = pmap_->map_pkfs_.find(pcurframe_->kfid_);
 
@@ -1027,14 +983,7 @@ bool VisualFrontEnd::checkNewKfReq()
     // Time diff since last KF in sec.
     double time_diff = pcurframe_->img_time_ - pkf->img_time_;
 
-    if( pslamstate_->stereo_ && time_diff > 1. 
-        && !pslamstate_->blocalba_is_on_ )
-    {
-        return true;
-    }
-
-    bool cx = med_rot_parallax >= pslamstate_->finit_parallax_ / 2.
-        || (pslamstate_->stereo_ && !pslamstate_->blocalba_is_on_ && pcurframe_->id_-pkf->id_ > 2);
+    bool cx = med_rot_parallax >= pslamstate_->finit_parallax_ / 2.;
 
     bool c0 = med_rot_parallax >= pslamstate_->finit_parallax_;
     bool c1 = pcurframe_->nb3dkps_ < 0.75 * pkf->nb3dkps_;
@@ -1053,9 +1002,6 @@ bool VisualFrontEnd::checkNewKfReq()
         std::cout << " / Cur Frame occup cells = " << pcurframe_->noccupcells_ << " / parallax = " << med_rot_parallax;
         std::cout << "\n-------------------------------------------------------------------\n\n";
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_TM_checkNewKfReq");
 
     return bkfreq;
 }
@@ -1142,9 +1088,6 @@ float VisualFrontEnd::computeParallax(const int kfid, bool do_unrot, bool bmedia
 
 void VisualFrontEnd::preprocessImage(cv::Mat &img_raw)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_TM_preprocessImage");
-
     // Set cur raw img
     // left_raw_img_ = img_raw;
 
@@ -1175,9 +1118,6 @@ void VisualFrontEnd::preprocessImage(cv::Mat &img_raw)
 
         cv::buildOpticalFlowPyramid(cur_img_, cur_pyr_, pslamstate_->klt_win_size_, pslamstate_->nklt_pyr_lvl_);
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_TM_preprocessImage");
 }
 
 

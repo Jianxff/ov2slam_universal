@@ -24,7 +24,7 @@
 *             Martial Sanfourche <first.last at onera dot fr>      (ONERA, DTIS - IVA)
 */
 
-#include <opencv2/highgui.hpp>
+// #include <opencv2/highgui.hpp>
 
 #include "multi_view_geometry.hpp"
 
@@ -41,9 +41,6 @@ MapManager::MapManager(std::shared_ptr<SlamParams> pstate, std::shared_ptr<Frame
 // the new KF are added to the map.
 void MapManager::createKeyframe(const cv::Mat &im, const cv::Mat &imraw)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.FE_createKeyframe");
-
     // Prepare Frame to become a KF
     // (Update observations between MPs / KFs)
     prepareFrame();
@@ -53,18 +50,12 @@ void MapManager::createKeyframe(const cv::Mat &im, const cv::Mat &imraw)
 
     // Add KF to the map
     addKeyframe();
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.FE_createKeyframe");
 }
 
 // Prepare Frame to become a KF
 // (Update observations between MPs / KFs)
 void MapManager::prepareFrame()
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_CF_prepareFrame");
-
     // Update new KF id
     pcurframe_->kfid_ = nkfid_;
 
@@ -107,16 +98,10 @@ void MapManager::prepareFrame()
         // Relate new KF id to the MP
         plmit->second->addKfObs(nkfid_);
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_CF_prepareFrame");
 }
 
 void MapManager::updateFrameCovisibility(Frame &frame)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.KF_updateFrameCovisilbity");
-
     // Update the MPs and the covisilbe graph between KFs
     std::map<int,int> map_covkfs;
     std::unordered_set<int> set_local_mapids;
@@ -185,9 +170,6 @@ void MapManager::updateFrameCovisibility(Frame &frame)
     } else {
         frame.set_local_mapids_.insert(set_local_mapids.begin(), set_local_mapids.end());
     }
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.KF_updateFrameCovisilbity");
 }
 
 void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Point2f> &vpts, Frame &frame)
@@ -283,9 +265,6 @@ void MapManager::addKeypointsToFrame(const cv::Mat &im, const std::vector<cv::Po
 // Extract new kps into provided image and update cur. Frame
 void MapManager::extractKeypoints(const cv::Mat &im, const cv::Mat &imraw)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.FE_CF_extractKeypoints");
-
     std::vector<Keypoint> vkps = pcurframe_->getKeypoints();
 
     std::vector<cv::Point2f> vpts;
@@ -333,9 +312,6 @@ void MapManager::extractKeypoints(const cv::Mat &im, const cv::Mat &imraw)
             }
         }
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.FE_CF_extractKeypoints");
 }
 
 
@@ -364,9 +340,6 @@ void MapManager::describeKeypoints(const cv::Mat &im, const std::vector<Keypoint
 // for the means of triangulation
 void MapManager::stereoMatching(Frame &frame, const std::vector<cv::Mat> &vleftpyr, const std::vector<cv::Mat> &vrightpyr) 
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("1.KF_stereoMatching");
-
     // Find stereo correspondances with left kps
     auto vleftkps = frame.getKeypoints();
     size_t nbkps = vleftkps.size();
@@ -416,66 +389,48 @@ void MapManager::stereoMatching(Frame &frame, const std::vector<cv::Mat> &vleftp
             }
         } 
         
-        // If stereo rect images, prior from SAD
-        if( pslamstate_->bdo_stereo_rect_ ) {
+        // Generate prior from 3d neighbors
+        const size_t nbmin3dcokps = 1;
 
-            float xprior = -1.;
-            float l1err;
-
-            cv::Point2f pyrleftpt = kp.px_ * downpyrcoef;
-
-            ptracker_->getLineMinSAD(vleftpyr.at(nmaxpyrlvl), vrightpyr.at(nmaxpyrlvl), pyrleftpt, winsize, xprior, l1err, true);
-
-            xprior *= uppyrcoef;
-
-            if( xprior >= 0 && xprior <= kp.px_.x ) {
-                priorpt.x = xprior;
+        auto vnearkps = frame.getSurroundingKeypoints(kp);
+        if( vnearkps.size() >= nbmin3dcokps ) 
+        {
+            std::vector<Keypoint> vnear3dkps;
+            vnear3dkps.reserve(vnearkps.size());
+            for( const auto &cokp : vnearkps ) {
+                if( cokp.is3d_ ) {
+                    vnear3dkps.push_back(cokp);
+                }
             }
 
-        }
-        else { // Generate prior from 3d neighbors
-            const size_t nbmin3dcokps = 1;
+            if( vnear3dkps.size() >= nbmin3dcokps ) {
+            
+                size_t nb3dkp = 0;
+                double mean_z = 0.;
+                double weights = 0.;
 
-            auto vnearkps = frame.getSurroundingKeypoints(kp);
-            if( vnearkps.size() >= nbmin3dcokps ) 
-            {
-                std::vector<Keypoint> vnear3dkps;
-                vnear3dkps.reserve(vnearkps.size());
-                for( const auto &cokp : vnearkps ) {
-                    if( cokp.is3d_ ) {
-                        vnear3dkps.push_back(cokp);
+                for( const auto &cokp : vnear3dkps ) {
+                    auto plm = getMapPoint(cokp.lmid_);
+                    if( plm != nullptr ) {
+                        nb3dkp++;
+                        double coef = 1. / cv::norm(cokp.unpx_ - kp.unpx_);
+                        weights += coef;
+                        mean_z += coef * frame.projWorldToCam(plm->getPoint()).z();
                     }
                 }
 
-                if( vnear3dkps.size() >= nbmin3dcokps ) {
-                
-                    size_t nb3dkp = 0;
-                    double mean_z = 0.;
-                    double weights = 0.;
+                if( nb3dkp >= nbmin3dcokps ) {
+                    mean_z /= weights;
+                    Eigen::Vector3d predcampt = mean_z * ( kp.bv_ / kp.bv_.z() );
 
-                    for( const auto &cokp : vnear3dkps ) {
-                        auto plm = getMapPoint(cokp.lmid_);
-                        if( plm != nullptr ) {
-                            nb3dkp++;
-                            double coef = 1. / cv::norm(cokp.unpx_ - kp.unpx_);
-                            weights += coef;
-                            mean_z += coef * frame.projWorldToCam(plm->getPoint()).z();
-                        }
-                    }
+                    cv::Point2f projpt = frame.projCamToRightImageDist(predcampt);
 
-                    if( nb3dkp >= nbmin3dcokps ) {
-                        mean_z /= weights;
-                        Eigen::Vector3d predcampt = mean_z * ( kp.bv_ / kp.bv_.z() );
-
-                        cv::Point2f projpt = frame.projCamToRightImageDist(predcampt);
-
-                        if( frame.isInRightImage(projpt) ) 
-                        {
-                            v3dkps.push_back(kp.px_);
-                            v3dpriors.push_back(projpt);
-                            v3dkpids.push_back(kp.lmid_);
-                            continue;
-                        }
+                    if( frame.isInRightImage(projpt) ) 
+                    {
+                        v3dkps.push_back(kp.px_);
+                        v3dpriors.push_back(projpt);
+                        v3dkpids.push_back(kp.lmid_);
+                        continue;
                     }
                 }
             }
@@ -584,14 +539,7 @@ void MapManager::stereoMatching(Frame &frame, const std::vector<cv::Mat> &vleftp
         cv::Point2f runpx = frame.pcalib_rightcam_->undistortImagePoint(vgoodrkps.at(i));
 
         // Check epipolar consistency (same row for rectified images)
-        if( pslamstate_->bdo_stereo_rect_ ) {
-            epi_err = fabs(lunpx.y - runpx.y);
-            // Correct right kp to be on the same row
-            vgoodrkps.at(i).y = lunpx.y;
-        }
-        else {
-            epi_err = MultiViewGeometry::computeSampsonDistance(frame.Frl_, lunpx, runpx);
-        }
+        epi_err = MultiViewGeometry::computeSampsonDistance(frame.Frl_, lunpx, runpx);
         
         if( epi_err <= 2. ) 
         {
@@ -603,9 +551,6 @@ void MapManager::stereoMatching(Frame &frame, const std::vector<cv::Mat> &vleftp
     if( pslamstate_->debug_ )
         std::cout << "\n \t>>> Nb of stereo tracks: " << nbgood
             << " out of " << nbkps << "\n";
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "1.KF_stereoMatching");
 }
 
 

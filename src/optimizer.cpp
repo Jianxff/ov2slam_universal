@@ -33,9 +33,6 @@
 
 void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.BA_SetupPb");
-
     // =================================
     //      Setup BA Problem
     // =================================
@@ -63,10 +60,6 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
     }
 
     size_t nmincstkfs = 2;
-
-    if( pslamstate_->stereo_ ) {
-        nmincstkfs = 1;
-    }
 
     size_t nbmono = 0;
     size_t nbstereo = 0;
@@ -103,27 +96,6 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
     
     Sophus::SE3d Trl, Tlr;
     PoseParametersBlock rlextrinpose(0, Trl);
-
-    if( pslamstate_->stereo_ ) {
-        // Right Intrinsic
-        rightcalibpar = CalibParametersBlock(0, pcalibright->fx_, pcalibright->fy_, pcalibright->cx_, pcalibright->cy_);
-        problem.AddParameterBlock(rightcalibpar.values(), 4);
-        ordering->AddElementToGroup(rightcalibpar.values(), 1);
-
-        problem.SetParameterBlockConstant(rightcalibpar.values());
-
-        // Right Extrinsic
-        Tlr = pcalibright->getExtrinsic();
-        Trl = Tlr.inverse();
-        rlextrinpose = PoseParametersBlock(0, Trl);
-
-        ceres::LocalParameterization *local_param = new SE3LeftParameterization();
-
-        problem.AddParameterBlock(rlextrinpose.values(), 7, local_param);
-        ordering->AddElementToGroup(rlextrinpose.values(), 1);
-
-        problem.SetParameterBlockConstant(rlextrinpose.values());
-    }
 
     // Get the new KF covisible KFs
     std::map<int,int> map_covkfs = newframe.getCovisibleKfMap();
@@ -469,20 +441,11 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
     
     options.minimizer_progress_to_stdout = pslamstate_->debug_;
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.BA_SetupPb");
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.BA_Optimize");
-
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
 
     if( pslamstate_->debug_ )
         std::cout << summary.FullReport() << std::endl;
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.BA_Optimize");
 
 
     // =================================
@@ -611,9 +574,6 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
         options.function_tolerance = 1.e-3;
         options.max_solver_time_in_seconds /= 2.;
         // options.max_solver_time_in_seconds = 0.05;
-        
-        if( pslamstate_->debug_ )
-            Profiler::Start("2.BA_L2-Refinement");
 
         ceres::Solve(options, &problem, &summary);
 
@@ -621,13 +581,7 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
 
         if( pslamstate_->debug_ )
             std::cout << summary.FullReport() << std::endl;
-
-        if( pslamstate_->debug_ )
-            Profiler::StopAndDisplay(pslamstate_->debug_, "2.BA_L2-Refinement");
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.BA_Update");
 
     // =================================
     //      Remove outliers
@@ -890,9 +844,6 @@ void Optimizer::localBA(Frame &newframe, const bool buse_robust_cost)
             << nbbadobsmono << " / " << nbbadobsrightcam;
     }
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.BA_Update");
-
     bstop_localba_ = false;
 }
 
@@ -904,9 +855,6 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
     // =================================
 
     Frame &newframe = *pmap_->getKeyframe(nkfid);
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_LooseBA_setup");
 
     ceres::Problem problem;
     ceres::LossFunctionWrapper *loss_function;
@@ -921,10 +869,6 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
     }
 
     size_t nmincstkfs = 2;
-
-    if( pslamstate_->stereo_ ) {
-        nmincstkfs = 1;
-    }
 
     size_t nbmono = 0;
     size_t nbstereo = 0;
@@ -961,27 +905,6 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
     
     Sophus::SE3d Trl, Tlr;
     PoseParametersBlock rlextrinpose(0, Trl);
-
-    if( pslamstate_->stereo_ ) {
-        // Right Intrinsic
-        rightcalibpar = CalibParametersBlock(0, pcalibright->fx_, pcalibright->fy_, pcalibright->cx_, pcalibright->cy_);
-        problem.AddParameterBlock(rightcalibpar.values(), 4);
-        ordering->AddElementToGroup(rightcalibpar.values(), 1);
-
-        problem.SetParameterBlockConstant(rightcalibpar.values());
-
-        // Right Extrinsic
-        Tlr = pcalibright->getExtrinsic();
-        Trl = Tlr.inverse();
-        rlextrinpose = PoseParametersBlock(0, Trl);
-
-        ceres::LocalParameterization *local_param = new SE3LeftParameterization();
-
-        problem.AddParameterBlock(rlextrinpose.values(), 7, local_param);
-        ordering->AddElementToGroup(rlextrinpose.values(), 1);
-
-        problem.SetParameterBlockConstant(rlextrinpose.values());
-    }
 
     // Keep track of MPs no suited for BA for speed-up
     std::unordered_set<int> set_badlmids;
@@ -1300,23 +1223,11 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
     
     options.minimizer_progress_to_stdout = pslamstate_->debug_;
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_LooseBA_setup");
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_LooseBA_Optimize");
-
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
 
     if( pslamstate_->debug_ )
         std::cout << summary.FullReport() << std::endl;
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_LooseBA_Optimize");
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_LooseBA_remove-outliers");
 
 
     // =================================
@@ -1523,15 +1434,9 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
         }
     }
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_LooseBA_remove-outliers");
-
     std::lock_guard<std::mutex> lock2(pmap_->optim_mutex_);
 
     std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_LooseBA_Update");
 
     // Update KFs / MPs
     for( size_t i = 0, iend = vlmids.size() ; i < iend ; i++ )
@@ -1664,9 +1569,6 @@ void Optimizer::looseBA(int inikfid, const int nkfid, const bool buse_robust_cos
         std::cout << "\n \t>>> looseBA() --> Nb of bad obs mono / stereo / right : " 
             << nbbadobsmono << " / " << nbbadobsrightcam;
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_LooseBA_Update");
 }
 
 
@@ -1693,10 +1595,6 @@ void Optimizer::fullBA(const bool buse_robust_cost)
     }
 
     size_t nmincstkfs = 2;
-
-    if( pslamstate_->stereo_ ) {
-        nmincstkfs = 1;
-    }
 
     size_t nbmono = 0;
     size_t nbstereo = 0;
@@ -1733,27 +1631,6 @@ void Optimizer::fullBA(const bool buse_robust_cost)
     
     Sophus::SE3d Trl, Tlr;
     PoseParametersBlock rlextrinpose(0, Trl);
-
-    if( pslamstate_->stereo_ ) {
-        // Right Intrinsic
-        rightcalibpar = CalibParametersBlock(0, pcalibright->fx_, pcalibright->fy_, pcalibright->cx_, pcalibright->cy_);
-        problem.AddParameterBlock(rightcalibpar.values(), 4);
-        ordering->AddElementToGroup(rightcalibpar.values(), 1);
-
-        problem.SetParameterBlockConstant(rightcalibpar.values());
-
-        // Right Extrinsic
-        Tlr = pcalibright->getExtrinsic();
-        Trl = Tlr.inverse();
-        rlextrinpose = PoseParametersBlock(0, Trl);
-
-        ceres::LocalParameterization *local_param = new SE3LeftParameterization();
-
-        problem.AddParameterBlock(rlextrinpose.values(), 7, local_param);
-        ordering->AddElementToGroup(rlextrinpose.values(), 1);
-
-        problem.SetParameterBlockConstant(rlextrinpose.values());
-    }
 
     // Keep track of MPs no suited for BA for speed-up
     std::unordered_set<int> set_badlmids;
@@ -2345,10 +2222,6 @@ bool Optimizer::stopLocalBA()
 
 bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3d& newTwc)
 {
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_PoseGraph_setup");
-
     ceres::Problem problem;
     
     std::map<int, PoseParametersBlock> map_id_posespar_;
@@ -2431,13 +2304,6 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
         std::cout << "\n Loop Error : " << verr.norm() << " / " 
             << verr.transpose() << "\n";
 
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_PoseGraph_setup");
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_PoseGraph_Optimize");
-
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
     options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
@@ -2453,24 +2319,12 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
     if( pslamstate_->debug_ )
         std::cout << summary.FullReport() << std::endl;
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_PoseGraph_Optimize");
-
     auto newkfpose = map_id_posespar_.at(newframe.kfid_);
     Sophus::SE3d newoptTwc = newkfpose.getPose();
 
     if( pslamstate_->debug_ ) {
         std::cout << "\nLC p3p pos : " << newTwc.translation().transpose() << "\n";
         std::cout << "\nLC opt pos : " << newoptTwc.translation().transpose() << "\n";
-    }
-
-    if( (newTwc.translation() - newoptTwc.translation()).norm() > 0.3
-            && pslamstate_->stereo_ ) 
-    {
-        if( pslamstate_->debug_ )
-            std::cout << "\n [PoseGraph] Skipping as we are most likely with a degenerate solution!";
-
-        return false;
     }
 
     std::unordered_set<int> processed_lmids;
@@ -2520,9 +2374,6 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
     }
 
     std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_PoseGraph_Update");
 
     // Propagate corrections to youngest KFs / MPs
     for( int kfid = newframe.kfid_+1 ; kfid <= pmap_->nkfid_ ; kfid++ ) 
@@ -2583,9 +2434,6 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
     Sophus::SE3d updTwcur = newoptTwc * relTlckf_cur;
 
     pmap_->pcurframe_->setTwc(updTwcur);
-    
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_PoseGraph_Update");
 
     return true;
 }
@@ -2593,9 +2441,6 @@ bool Optimizer::localPoseGraph(Frame &newframe, int kfloop_id, const Sophus::SE3
 
 void Optimizer::structureOnlyBA(const std::vector<int> &vlm2optids) 
 {
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_StructBA_setup");
-
     ceres::Problem problem;
     ceres::LossFunctionWrapper *loss_function;
     
@@ -2626,27 +2471,6 @@ void Optimizer::structureOnlyBA(const std::vector<int> &vlm2optids)
     
     Sophus::SE3d Trl, Tlr;
     PoseParametersBlock rlextrinpose(0, Trl);
-
-    if( pslamstate_->stereo_ ) {
-        // Right Intrinsic
-        rightcalibpar = CalibParametersBlock(0, pcalibright->fx_, pcalibright->fy_, pcalibright->cx_, pcalibright->cy_);
-        problem.AddParameterBlock(rightcalibpar.values(), 4);
-        ordering->AddElementToGroup(rightcalibpar.values(), 1);
-
-        problem.SetParameterBlockConstant(rightcalibpar.values());
-
-        // Right Extrinsic
-        Tlr = pcalibright->getExtrinsic();
-        Trl = Tlr.inverse();
-        rlextrinpose = PoseParametersBlock(0, Trl);
-
-        ceres::LocalParameterization *local_param = new SE3LeftParameterization();
-
-        problem.AddParameterBlock(rlextrinpose.values(), 7, local_param);
-        ordering->AddElementToGroup(rlextrinpose.values(), 1);
-
-        problem.SetParameterBlockConstant(rlextrinpose.values());
-    }
 
     for( const auto &lmid : vlm2optids ) {
 
@@ -2730,12 +2554,6 @@ void Optimizer::structureOnlyBA(const std::vector<int> &vlm2optids)
         }
     }
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_StructBA_setup");
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_StructBA_Optimize");
-
     ceres::Solver::Options options;
     options.linear_solver_ordering.reset(ordering);
 
@@ -2760,12 +2578,6 @@ void Optimizer::structureOnlyBA(const std::vector<int> &vlm2optids)
     if( pslamstate_->debug_ )
         std::cout << summary.FullReport() << std::endl;
 
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_StructBA_Optimize");
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::Start("2.LC_StructBA_Update");
-
     for( const auto &lmid : vlm2optids ) 
     {
         auto optlmit = map_id_pointspar_.find(lmid);
@@ -2774,9 +2586,6 @@ void Optimizer::structureOnlyBA(const std::vector<int> &vlm2optids)
             pmap_->updateMapPoint(lmid, optlmit->second.getPoint());
         }
     }
-
-    if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-        Profiler::StopAndDisplay(pslamstate_->debug_, "2.LC_StructBA_Update");
 }
 
 

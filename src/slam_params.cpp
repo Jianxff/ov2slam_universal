@@ -31,17 +31,9 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
     std::cout << "\nSLAM Parameters are being setup...\n";
 
     // READ THE SETTINGS
-    debug_ = static_cast<int>(fsSettings["debug"]);;
-    log_timings_ = static_cast<int>(fsSettings["log_timings"]);;
-
-    mono_ =  static_cast<int>(fsSettings["mono"]);
-    stereo_ = static_cast<int>(fsSettings["stereo"]);
+    debug_ = static_cast<int>(fsSettings["debug"]);
 
     bforce_realtime_ = static_cast<int>(fsSettings["force_realtime"]);
-
-    slam_mode_ = static_cast<int>(fsSettings["slam_mode"]);
-
-    buse_loop_closer_ = static_cast<int>(fsSettings["buse_loop_closer"]);
 
     cam_left_topic_.assign(fsSettings["Camera.topic_left"]);
     cam_left_model_.assign(fsSettings["Camera.model_left"]);
@@ -58,38 +50,8 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
     p1l_ = fsSettings["Camera.p1l"];
     p2l_ = fsSettings["Camera.p2l"];
 
-    if( stereo_ ) {
-        cam_right_topic_.assign(fsSettings["Camera.topic_right"]);
-        cam_right_model_.assign(fsSettings["Camera.model_right"]);
-
-        img_right_w_ = fsSettings["Camera.right_nwidth"];
-        img_right_h_ = fsSettings["Camera.right_nheight"];
-
-        fxr_ = fsSettings["Camera.fxr"];
-        fyr_ = fsSettings["Camera.fyr"];
-        cxr_ = fsSettings["Camera.cxr"];
-        cyr_ = fsSettings["Camera.cyr"];
-
-        k1r_ = fsSettings["Camera.k1r"];
-        k2r_ = fsSettings["Camera.k2r"];
-        p1r_ = fsSettings["Camera.p1r"];
-        p2r_ = fsSettings["Camera.p2r"];
-
-        cv::Mat cvTbc0, cvTbc1;
-        Eigen::Matrix4d Tbc0, Tbc1;
-
-        fsSettings["body_T_cam0"] >> cvTbc0;
-        fsSettings["body_T_cam1"] >> cvTbc1;
-
-        cv::cv2eigen(cvTbc0,Tbc0);
-        cv::cv2eigen(cvTbc1,Tbc1);
-
-        T_left_right_ = Sophus::SE3d(Tbc0.inverse() * Tbc1);
-    }
-
     finit_parallax_ = fsSettings["finit_parallax"];
 
-    bdo_stereo_rect_ = static_cast<int>(fsSettings["bdo_stereo_rect"]);
     alpha_ = fsSettings["alpha"];
 
     bdo_undist_ = static_cast<int>(fsSettings["bdo_undist"]);
@@ -148,7 +110,6 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
     // Bundle Adjustment Parameters
     // (mostly related to Ceres options)
     robust_mono_th_ = fsSettings["robust_mono_th"];
-    robust_stereo_th_ = fsSettings["robust_stereo_th"];
 
     use_sparse_schur_ = static_cast<int>(fsSettings["use_sparse_schur"]);
     use_dogleg_ = static_cast<int>(fsSettings["use_dogleg"]);
@@ -161,14 +122,113 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
 
     // Map Filtering parameters
     fkf_filtering_ratio_ = fsSettings["fkf_filtering_ratio"]; 
+}
 
-    // Apply Full BA?
-    do_full_ba_ = static_cast<int>(fsSettings["do_full_ba"]);
+SlamParams::SlamParams(int imwidth, int imheight, int fov, bool accurate){
+    bforce_realtime_ = 1;
+
+    img_left_w_ = imwidth;
+    img_left_h_ = imheight;
+
+    cxl_ = (double) imwidth * 0.5;
+    cyl_ = (double) imheight * 0.5;
+
+    // auto-calculate fx and fy
+    double aspect = (double) imwidth / (double) imheight;
+    double fovH = imwidth > imheight ? (fov * aspect) : fov; 
+    double fovV = imwidth > imheight ? fov : (fov * aspect);
+    
+    double fx = cxl_ / std::tan(fovH * 0.5 * M_PI / 180);
+    double fy = cyl_ / std::tan(fovV * 0.5 * M_PI / 180);
+    
+    fxl_ = std::min(fx, fy);
+    fyl_ = fxl_;
+    
+
+    k1l_ = 0;
+    k2l_ = 0;
+    p1l_ = 0;
+    p2l_ = 0;
+
+    finit_parallax_ = 20.;
+
+    // bdo_stereo_rect_ = 0;
+    alpha_ = 0;
+
+    bdo_undist_ = 0;
+    
+    bdo_random = 1;
+
+    use_shi_tomasi_ = 0;
+
+    use_fast_ = accurate ? 0 : 1;
+    use_brief_ = 1;
+    use_singlescale_detector_ = accurate ? 1 : 0;
+
+    nfast_th_ = 10;
+    dmaxquality_ = 0.001;
+
+    nmaxdist_ = accurate ? 35 : 50;
+    float nbwcells = ceil( (float)img_left_w_ / nmaxdist_ );
+    float nbhcells = ceil( (float)img_left_h_ / nmaxdist_ );
+    nbmaxkps_ = nbwcells * nbhcells;
+
+    use_clahe_ = 0;
+    fclahe_val_ = 3;
+
+    do_klt_ = 1;
+    klt_use_prior_ = 1;
+
+    btrack_keyframetoframe_ = 0;
+
+    nklt_win_size_ = 9;
+    nklt_pyr_lvl_ = 3;
+
+    klt_win_size_ = cv::Size(nklt_win_size_, nklt_win_size_);
+
+    fmax_fbklt_dist_ = 0.5;
+    nmax_iter_ = 30;
+    fmax_px_precision_ =0.01;
+
+    
+    nklt_err_ = 30.;
+
+    // Matching th.
+    bdo_track_localmap_ = 1;
+
+    fmax_desc_dist_ = 0.2;
+    fmax_proj_pxdist_ = 2.;
+
+    doepipolar_ = 1;
+    dop3p_ = accurate ? 1 : 0;
+
+    fransac_err_ = 3.;
+    fepi_th_ = fransac_err_;
+    nransac_iter_ = 100;
+
+    fmax_reproj_err_ = 3.;
+    buse_inv_depth_ = 1;
+
+    // Bundle Adjustment Parameters
+    // (mostly related to Ceres options)
+    robust_mono_th_ = 5.9915;
+
+    use_sparse_schur_ = 1;
+    use_dogleg_ = 0;
+    use_subspace_dogleg_ = 0;
+    use_nonmonotic_step_ = 0;
+
+    apply_l2_after_robust_ = 1;
+
+    nmin_covscore_ = 25;
+
+    // Map Filtering parameters
+    fkf_filtering_ratio_ = 0.9;
+    
 }
 
 void SlamParams::reset() {
     blocalba_is_on_ = false;
-    blc_is_on_ = false;
     bvision_init_ = false;
     breset_req_ = false;
 }

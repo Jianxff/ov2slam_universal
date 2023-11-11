@@ -23,28 +23,11 @@
 *             Julien Moras       <first.last at onera dot fr>      (ONERA, DTIS - IVA),
 *             Martial Sanfourche <first.last at onera dot fr>      (ONERA, DTIS - IVA)
 */
-
-#ifdef USE_OPENGV
-
-#include <opengv/types.hpp>
-#include <opengv/triangulation/methods.hpp>
-#include <opengv/sac/Ransac.hpp>
-#include <opengv/sac/Lmeds.hpp>
-#include <opengv/absolute_pose/methods.hpp>
-#include <opengv/absolute_pose/CentralAbsoluteAdapter.hpp>
-#include <opengv/sac_problems/absolute_pose/AbsolutePoseSacProblem.hpp>
-#include <opengv/relative_pose/methods.hpp>
-#include <opengv/relative_pose/CentralRelativeAdapter.hpp>
-#include <opengv/sac_problems/relative_pose/CentralRelativePoseSacProblem.hpp>
-
-#endif
-
 #include "multi_view_geometry.hpp"
 #include "ceres_parametrization.hpp"
 
 #include <opencv2/core/eigen.hpp>
 #include <opencv2/calib3d.hpp>
-
 
 // Triangulation methods
 // =====================
@@ -59,44 +42,6 @@ Eigen::Vector3d MultiViewGeometry::triangulate(const Sophus::SE3d &Tlr,
         return opencvTriangulate(Tlr, bvl, bvr);
     #endif
 }
-
-// OpenGV based
-
-#ifdef USE_OPENGV
-Eigen::Vector3d MultiViewGeometry::opengvTriangulate1(const Sophus::SE3d &Tlr, 
-    const Eigen::Vector3d &bvl, const Eigen::Vector3d &bvr)
-{
-    opengv::bearingVectors_t bv1(1,bvl);
-    opengv::bearingVectors_t bv2(1,bvr);
-    opengv::rotation_t R12 = Tlr.rotationMatrix();
-    opengv::translation_t t12 = Tlr.translation();
-
-    opengv::relative_pose::CentralRelativeAdapter 
-                    adapter(bv1, bv2, t12, R12);
-
-    opengv::point_t pt = 
-            opengv::triangulation::triangulate(adapter, 0);
-
-    return pt;
-}
-
-Eigen::Vector3d MultiViewGeometry::opengvTriangulate2(const Sophus::SE3d &Tlr, 
-    const Eigen::Vector3d &bvl, const Eigen::Vector3d &bvr)
-{
-    opengv::bearingVectors_t bv1(1,bvl);
-    opengv::bearingVectors_t bv2(1,bvr);
-    opengv::rotation_t R12 = Tlr.rotationMatrix();
-    opengv::translation_t t12 = Tlr.translation();
-
-    opengv::relative_pose::CentralRelativeAdapter 
-                    adapter(bv1, bv2, t12, R12);
-
-    opengv::point_t pt = 
-            opengv::triangulation::triangulate2(adapter, 0);
-
-    return pt;
-}
-#endif
 
 // OpenCV based
 
@@ -148,200 +93,9 @@ bool MultiViewGeometry::p3pRansac(
     const float fx, const float fy, Sophus::SE3d &Twc, std::vector<int> &voutliersidx, 
     bool use_lmeds)
 {
-    #ifdef USE_OPENGV
-        if( use_lmeds ) {
-            return opengvP3PLMeds(bvs, vwpts, nmaxiter, errth, 
-                    boptimize, bdorandom, fx, fy, Twc, voutliersidx);
-        } else {
-            return opengvP3PRansac(bvs, vwpts, nmaxiter, errth, 
-                    boptimize, bdorandom, fx, fy, Twc, voutliersidx);
-        }
-    #else
-        return opencvP3PRansac(bvs, vwpts, nmaxiter, errth, 
+    return opencvP3PRansac(bvs, vwpts, nmaxiter, errth, 
                     fx, fy, boptimize, Twc, voutliersidx);
-    #endif
 }
-
-// OpenGV based
-
-#ifdef USE_OPENGV
-bool MultiViewGeometry::opengvP3PRansac(
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs,
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &vwpts,
-    const int nmaxiter, const float errth, const bool boptimize, const bool bdorandom,
-    const float fx, const float fy, Sophus::SE3d &Twc, std::vector<int> &voutliersidx)
-{
-    assert( bvs.size() == vwpts.size() );
-
-    size_t nb3dpts = bvs.size();
-
-    if( nb3dpts < 4 ) {
-        return false;
-    }
-
-    voutliersidx.reserve(nb3dpts);
-
-    opengv::bearingVectors_t gvbvs;
-    opengv::points_t gvwpt;
-    gvbvs.reserve(nb3dpts);
-    gvwpt.reserve(nb3dpts);
-
-    for( size_t i = 0 ; i < nb3dpts ; i++ )
-    {
-        gvbvs.push_back(bvs.at(i));
-        gvwpt.push_back(vwpts.at(i));
-    }
-
-    opengv::absolute_pose::CentralAbsoluteAdapter 
-                            adapter(gvbvs, gvwpt);
-
-    //Create an AbsolutePoseSac problem and Ransac
-    //The method can be set to KNEIP, GAO or EPNP
-    opengv::sac::Ransac<opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem> ransac;
-
-    std::shared_ptr<
-        opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem> absposeproblem_ptr(
-        new opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem(
-        adapter,
-        opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem::KNEIP,
-        bdorandom));
-
-    float focal = fx + fy;
-    focal /= 2.;
-
-    ransac.sac_model_ = absposeproblem_ptr;
-    ransac.threshold_ = (1.0 - cos(atan(errth/focal)));
-    ransac.max_iterations_ = nmaxiter;
-
-    // Computing the pose from P3P
-    ransac.computeModel(0);
-
-    // If no solution found, return false
-    if( ransac.inliers_.size() < 5 ) {
-        return false;
-    }
-
-    // Might happen apparently...
-    if( !Sophus::isOrthogonal(ransac.model_coefficients_.block<3,3>(0,0)) )
-        return false;
-
-    // Optimize the computed pose with inliers only
-    opengv::transformation_t T_opt;
-
-    if( boptimize ) {
-        ransac.sac_model_->optimizeModelCoefficients(ransac.inliers_, ransac.model_coefficients_, T_opt);
-
-        Twc.translation() = T_opt.rightCols(1);
-        Twc.setRotationMatrix(T_opt.leftCols(3));
-    } else {
-        Twc.translation() = ransac.model_coefficients_.rightCols(1);
-        Twc.setRotationMatrix(ransac.model_coefficients_.leftCols(3));
-    }
-
-    size_t k = 0;
-    for( size_t i = 0 ; i < nb3dpts ; i++ ) {
-        if( ransac.inliers_.at(k) == (int)i ) {
-            k++;
-            if( k == ransac.inliers_.size() ) {
-                k = 0;
-            }
-        } else {
-            voutliersidx.push_back(i);
-        }
-    }
-
-    return true;
-}
-
-
-bool MultiViewGeometry::opengvP3PLMeds(
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs,
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &vwpts,
-    const int nmaxiter, const float errth, const bool boptimize, const bool bdorandom,
-    const float fx, const float fy, Sophus::SE3d &Twc, std::vector<int> &voutliersidx)
-{
-    assert( bvs.size() == vwpts.size() );
-
-    size_t nb3dpts = bvs.size();
-
-    if( nb3dpts < 4 ) {
-        return false;
-    }
-
-    voutliersidx.reserve(nb3dpts);
-
-    opengv::bearingVectors_t gvbvs;
-    opengv::points_t gvwpt;
-    gvbvs.reserve(nb3dpts);
-    gvwpt.reserve(nb3dpts);
-
-    for( size_t i = 0 ; i < nb3dpts ; i++ )
-    {
-        gvbvs.push_back(bvs.at(i));
-        gvwpt.push_back(vwpts.at(i));
-    }
-    
-    opengv::absolute_pose::CentralAbsoluteAdapter 
-                            adapter(gvbvs, gvwpt);
-
-    //Create an AbsolutePoseSac problem and Ransac
-    //The method can be set to KNEIP, GAO or EPNP
-    opengv::sac::Lmeds<opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem> ransac;
-
-    std::shared_ptr<
-        opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem> absposeproblem_ptr(
-        new opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem(
-        adapter,
-        opengv::sac_problems::absolute_pose::AbsolutePoseSacProblem::KNEIP,
-        bdorandom));
-
-    float focal = fx + fy;
-    focal /= 2.;
-
-    ransac.sac_model_ = absposeproblem_ptr;
-    ransac.threshold_ = (1.0 - cos(atan(errth/focal)));
-    ransac.max_iterations_ = nmaxiter;
-
-    // Computing the pose from P3P
-    ransac.computeModel(0);
-
-    // If no solution found, return false
-    if( ransac.inliers_.size() < 5 ) {
-        return false;
-    }
-
-    // Might happen apparently...
-    if( !Sophus::isOrthogonal(ransac.model_coefficients_.block<3,3>(0,0)) )
-        return false;
-
-    // Optimize the computed pose with inliers only
-    opengv::transformation_t T_opt;
-
-    if( boptimize ) {
-        ransac.sac_model_->optimizeModelCoefficients(ransac.inliers_, ransac.model_coefficients_, T_opt);
-
-        Twc.translation() = T_opt.rightCols(1);
-        Twc.setRotationMatrix(T_opt.leftCols(3));
-    } else {
-        Twc.translation() = ransac.model_coefficients_.rightCols(1);
-        Twc.setRotationMatrix(ransac.model_coefficients_.leftCols(3));
-    }
-
-    size_t k = 0;
-    for( size_t i = 0 ; i < nb3dpts ; i++ ) {
-        if( ransac.inliers_.at(k) == (int)i ) {
-            k++;
-            if( k == ransac.inliers_.size() ) {
-                k = 0;
-            }
-        } else {
-            voutliersidx.push_back(i);
-        }
-    }
-
-    return true;
-}
-#endif
 
 // OpenCV based
 
@@ -598,103 +352,14 @@ bool MultiViewGeometry::compute5ptEssentialMatrix(
     const bool bdorandom, const float fx, const float fy, Eigen::Matrix3d &Rwc,
     Eigen::Vector3d &twc, std::vector<int> &voutliersidx)
 {
-    #ifdef USE_OPENGV
-        return opengv5ptEssentialMatrix(bvs1, bvs2, nmaxiter, errth, boptimize, 
-                                    bdorandom, fx, fy, Rwc, twc, voutliersidx);
-    #else
+    try{
         return opencv5ptEssentialMatrix(bvs1, bvs2, nmaxiter, errth, boptimize, 
                                     fx, fy, Rwc, twc, voutliersidx);
-    #endif    
-}
-
-// OpenGV
-
-#ifdef USE_OPENGV
-bool MultiViewGeometry::opengv5ptEssentialMatrix(
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs1, 
-    const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs2, 
-    const int nmaxiter, const float errth, const bool boptimize, 
-    const bool bdorandom, const float fx, const float fy, Eigen::Matrix3d &Rwc, 
-    Eigen::Vector3d &twc, std::vector<int> &voutliersidx)
-{
-    assert( bvs1.size() == bvs2.size() );
-
-    size_t nbpts = bvs1.size();
-
-    if( nbpts < 8 ) {
+    } catch(cv::Exception& e) {
+        std::cout << e.what() << std::endl;
         return false;
     }
-
-    voutliersidx.reserve(nbpts);
-
-    opengv::bearingVectors_t vbv1, vbv2;
-    vbv1.reserve(nbpts);
-    vbv2.reserve(nbpts);
-
-    for( size_t i = 0 ; i < nbpts ; i++ )
-    {
-        vbv1.push_back(bvs1.at(i));
-        vbv2.push_back(bvs2.at(i));
-    }
-    
-    //create a central relative adapter
-    opengv::relative_pose::CentralRelativeAdapter 
-                                adapter(vbv1, vbv2);
-
-    opengv::sac::Ransac<
-        opengv::sac_problems::relative_pose::CentralRelativePoseSacProblem> ransac;
-
-    std::shared_ptr<
-        opengv::sac_problems::relative_pose::CentralRelativePoseSacProblem> relposeproblem_ptr(
-            new opengv::sac_problems::relative_pose::CentralRelativePoseSacProblem(
-                adapter,
-                opengv::sac_problems::relative_pose::CentralRelativePoseSacProblem::NISTER,
-                bdorandom));
-
-    float focal = fx + fy;
-    focal /= 2.;
-
-    ransac.sac_model_ = relposeproblem_ptr;
-    ransac.threshold_ = 2.0*(1.0 - cos(atan(errth/focal)));
-    // ransac.threshold_ = (1.0 - cos(atan(errth/focal)));
-    ransac.max_iterations_ = nmaxiter;
-
-    ransac.computeModel(0);
-
-    // If no solution found, return false
-    if( ransac.inliers_.size() < 10 ) {
-        return false;
-    }
-
-    twc = ransac.model_coefficients_.rightCols(1);
-    Rwc = ransac.model_coefficients_.leftCols(3);
-
-    // Optimize the computed pose with inliers only
-    opengv::transformation_t T_opt;
-
-    if( boptimize ) {
-        ransac.sac_model_->optimizeModelCoefficients(ransac.inliers_, ransac.model_coefficients_, T_opt);
-
-        Rwc = T_opt.leftCols(3);
-        twc = T_opt.rightCols(1);
-        twc.normalize();
-    }
-
-    size_t k = 0;
-    for( size_t i = 0 ; i < nbpts ; i++ ) {
-        if( ransac.inliers_.at(k) == (int)i ) {
-            k++;
-            if( k == ransac.inliers_.size() ) {
-                k = 0;
-            }
-        } else {
-            voutliersidx.push_back(i);
-        }
-    }
-
-    return true;
 }
-#endif 
 
 bool MultiViewGeometry::opencv5ptEssentialMatrix(
     const std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d> > &bvs1, 

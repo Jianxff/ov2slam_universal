@@ -26,7 +26,7 @@
 
 #include <thread>
 #include <chrono>
-#include <opencv2/highgui.hpp>
+// #include <opencv2/highgui.hpp>
 
 #include "ov2slam.hpp"
 
@@ -34,51 +34,19 @@
 SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate)
     : pslamstate_(pstate)
 {
-    std::cout << "\n SLAM Manager is being created...\n";
-
-    #ifdef OPENCV_CONTRIB
-        std::cout << "\n OPENCV CONTRIB FOUND!  BRIEF DESCRIPTOR WILL BE USED!\n";
-    #else
-        std::cout << "\n OPENCV CONTRIB NOT FOUND!  ORB DESCRIPTOR WILL BE USED!\n";
-    #endif
-
-    #ifdef USE_OPENGV
-        std::cout << "\n OPENGV FOUND!  OPENGV MVG FUNCTIONS WILL BE USED!\n";
-    #else
-        std::cout << "\n OPENGV NOT FOUND!  OPENCV MVG FUNCTIONS WILL BE USED!\n";
-    #endif
-
     // We first setup the calibration to init everything related
     // to the configuration of the current run
     std::cout << "\n SetupCalibration()\n";
     setupCalibration();
 
-    if( pslamstate_->stereo_ && pslamstate_->bdo_stereo_rect_ ) {
-        std::cout << "\n SetupStereoCalibration()\n";
-        setupStereoCalibration();
-    }
-    else if( pslamstate_->mono_ && pslamstate_->bdo_stereo_rect_ ) {
-        pslamstate_->bdo_stereo_rect_ = false;
-    }
-
     // If no stereo rectification required (i.e. mono config or 
     // stereo w/o rectification) and image undistortion required
-    if( !pslamstate_->bdo_stereo_rect_ && pslamstate_->bdo_undist_ ) {
+    if( pslamstate_->bdo_undist_ ) {
         std::cout << "\n Setup Image Undistortion\n";
         pcalib_model_left_->setUndistMap(pslamstate_->alpha_);
-        if( pslamstate_->stereo_ )
-            pcalib_model_right_->setUndistMap(pslamstate_->alpha_);
     }
 
-    if( pslamstate_->mono_ ) {
-        pcurframe_.reset( new Frame(pcalib_model_left_, pslamstate_->nmaxdist_) );
-    } else if( pslamstate_->stereo_ ) {
-        pcurframe_.reset( new Frame(pcalib_model_left_, pcalib_model_right_, pslamstate_->nmaxdist_) );
-    } else {
-        std::cerr << "\n\n=====================================================\n\n";
-        std::cerr << "\t\t YOU MUST CHOOSE BETWEEN MONO / STEREO (and soon RGBD)\n";
-        std::cerr << "\n\n=====================================================\n\n";
-    }
+    pcurframe_.reset( new Frame(pcalib_model_left_, pslamstate_->nmaxdist_) );
 
     // Create all objects to be used within OV²SLAM
     // =============================================
@@ -113,39 +81,30 @@ SlamManager::SlamManager(std::shared_ptr<SlamParams> pstate)
     pmapper_.reset( new Mapper(pslamstate_, pmap_, pcurframe_) );
 }
 
+
+#ifdef MULTI_THREAD
 void SlamManager::run()
 {
     std::cout << "\nOV²SLAM is ready to process incoming images!\n";
 
     bis_on_ = true;
 
-    cv::Mat img_left, img_right;
+    std::thread mapper_thread(&Mapper::run, pmapper_);
+
+    cv::Mat img;
 
     double time = -1.; // Current image timestamp
-    double cam_delay = -1.; // Delay between two successive images
-    double last_img_time = -1.; // Last received image time
 
     // Main SLAM loop
     while( !bexit_required_ ) {
 
         // 0. Get New Images
         // =============================================
-        if( getNewImage(img_left, img_right, time) )
+        if( getNewImage(img, time) )
         {
             // Update current frame
             frame_id_++;
             pcurframe_->updateFrame(frame_id_, time);
-
-            // Update cam delay for automatic exit
-            double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
-            if( frame_id_ > 0 ) {
-                cam_delay = time_now_ms / 1e3 - last_img_time;
-                last_img_time += cam_delay;
-            } else {
-                last_img_time = time_now_ms / 1e3;
-            }
 
             // Display info on current frame state
             if( pslamstate_->debug_ )
@@ -156,10 +115,8 @@ void SlamManager::run()
             if( pslamstate_->debug_ )
                 std::cout << "\n \t >>> [SLAM Node] New image send to Front-End\n";
 
-            bool is_kf_req = pvisualfrontend_->visualTracking(img_left, time);
+            bool is_kf_req = pvisualfrontend_->visualTracking(img, time);
 
-            // Save current pose
-            Logger::addSE3Pose(time, pcurframe_->getTwc(), is_kf_req);
 
             if( pslamstate_->breset_req_ ) {
                 reset();
@@ -173,63 +130,72 @@ void SlamManager::run()
                 if( pslamstate_->debug_ )
                     std::cout << "\n \t >>> [SLAM Node] New Keyframe send to Back-End\n";
 
-                if( pslamstate_->stereo_ ) 
-                {
-                    Keyframe kf(
-                        pcurframe_->kfid_, 
-                        img_left,
-                        img_right,
-                        pvisualfrontend_->cur_pyr_
-                        );
-
-                    pmapper_->addNewKf(kf);
-                } 
-                else if( pslamstate_->mono_ ) 
-                {
-                    Keyframe kf(pcurframe_->kfid_, img_left);
-                    pmapper_->addNewKf(kf);
-                }
+                Keyframe kf(pcurframe_->kfid_, img);
+                pmapper_->addNewKf(kf);
 
             }
-
-            if( pslamstate_->debug_ || pslamstate_->log_timings_ )
-                std::cout << Profiler::getInstance().displayTimeLogs() << std::endl;
-
         } 
         else {
-
-            // 3. Check if we are done with a sequence!
-            // ========================================
-            bool c1 = cam_delay > 0;
-            double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
-            bool c2 = ( time_now_ms / 1e3 - last_img_time ) > 100. * cam_delay;
-            bool c3 = !bnew_img_available_;
-
-            if( c1 && c2 && c3 )
-            {
-                bexit_required_ = true;
-
-                // Warn threads to stop and then save the results only in this case of 
-                // automatic stop because end of sequence reached 
-                // (avoid wasting time when forcing stop by CTRL+C)
-                pmapper_->bexit_required_ = true;
-
-                writeResults();
-
-            }
-            else {
-                std::chrono::milliseconds dura(1);
-                std::this_thread::sleep_for(dura);
-            }
+            std::chrono::milliseconds dura(1);
+            std::this_thread::sleep_for(dura);
         }
     }
 
     std::cout << "\nOV²SLAM is stopping!\n";
 
+    mapper_thread.join();
+
     bis_on_ = false;
 }
+
+#else
+
+void SlamManager::step()
+{    
+    bis_on_ = true;
+    
+    cv::Mat img;
+
+    double time = -1.; // Current image timestamp
+
+    if( getNewImage(img, time) )
+    {
+        // Update current frame
+        frame_id_++;
+        pcurframe_->updateFrame(frame_id_, time);
+
+        // Display info on current frame state
+        if( pslamstate_->debug_ )
+            pcurframe_->displayFrameInfo();
+
+        // 1. Send images to the FrontEnd
+        // =============================================
+        if( pslamstate_->debug_ )
+            std::cout << "\n \t >>> [SLAM Node] New image send to Front-End\n";
+
+        bool is_kf_req = pvisualfrontend_->visualTracking(img, time);
+
+
+        if( pslamstate_->breset_req_ ) {
+            reset();
+            return;
+        }
+
+        // 2. Create new KF if req. / Send new KF to Mapper
+        // ================================================
+        if( is_kf_req ) 
+        {
+            if( pslamstate_->debug_ )
+                std::cout << "\n \t >>> [SLAM Node] New Keyframe send to Back-End\n";
+
+            Keyframe kf(pcurframe_->kfid_, img);
+            pmapper_->addNewKf(kf);
+            pmapper_->step();
+        }
+    } 
+}
+
+#endif
 
 void SlamManager::addNewMonoImage(const double time, cv::Mat &im0)
 {
@@ -238,28 +204,14 @@ void SlamManager::addNewMonoImage(const double time, cv::Mat &im0)
     }
 
     std::lock_guard<std::mutex> lock(img_mutex_);
-    qimg_left_.push(im0);
+    qimg_.push(im0);
     qimg_time_.push(time);
 
     bnew_img_available_ = true;
 }
 
-void SlamManager::addNewStereoImages(const double time, cv::Mat &im0, cv::Mat &im1) 
-{
-    if( pslamstate_->bdo_stereo_rect_ || pslamstate_->bdo_undist_ ) {
-        pcalib_model_left_->rectifyImage(im0, im0);
-        pcalib_model_right_->rectifyImage(im1, im1);
-    }
 
-    std::lock_guard<std::mutex> lock(img_mutex_);
-    qimg_left_.push(im0);
-    qimg_right_.push(im1);
-    qimg_time_.push(time);
-
-    bnew_img_available_ = true;
-}
-
-bool SlamManager::getNewImage(cv::Mat &iml, cv::Mat &imr, double &time)
+bool SlamManager::getNewImage(cv::Mat &im, double &time)
 {
     std::lock_guard<std::mutex> lock(img_mutex_);
 
@@ -272,28 +224,23 @@ bool SlamManager::getNewImage(cv::Mat &iml, cv::Mat &imr, double &time)
     do {
         k++;
 
-        iml = qimg_left_.front();
-        qimg_left_.pop();
+        im = qimg_.front();
+        qimg_.pop();
 
         time = qimg_time_.front();
         qimg_time_.pop();
-        
-        if( pslamstate_->stereo_ ) {
-            imr = qimg_right_.front();
-            qimg_right_.pop();
-        }
 
         if( !pslamstate_->bforce_realtime_ )
             break;
 
-    } while( !qimg_left_.empty() );
+    } while( !qimg_.empty() );
 
     if( k > 1 ) {    
         if( pslamstate_->debug_ )
             std::cout << "\n SLAM is late!  Skipped " << k-1 << " frames...\n";
     }
     
-    if( qimg_left_.empty() ) {
+    if( qimg_.empty() ) {
         bnew_img_available_ = false;
     }
 
@@ -313,110 +260,6 @@ void SlamManager::setupCalibration()
                         pslamstate_->img_left_h_
                         ) 
                     );
-
-    if( pslamstate_->stereo_ ) 
-    {
-        pcalib_model_right_.reset( 
-                    new CameraCalibration(
-                            pslamstate_->cam_right_model_, 
-                            pslamstate_->fxr_, pslamstate_->fyr_, 
-                            pslamstate_->cxr_, pslamstate_->cyr_,
-                            pslamstate_->k1r_, pslamstate_->k2r_, 
-                            pslamstate_->p1r_, pslamstate_->p2r_,
-                            pslamstate_->img_right_w_, 
-                            pslamstate_->img_right_h_
-                            ) 
-                        );
-        
-        // TODO: Change this and directly add the extrinsic parameters within the 
-        // constructor (maybe set default parameters on extrinsic with identity / zero)
-        pcalib_model_right_->setupExtrinsic(pslamstate_->T_left_right_);
-    }
-}
-
-void SlamManager::setupStereoCalibration()
-{
-    // Apply stereorectify and setup the calibration models
-    cv::Mat Rl, Rr, Pl, Pr, Q;
-
-    cv::Rect rectleft, rectright;
-
-    if( pcalib_model_left_->model_ != pcalib_model_right_->model_ )
-    {
-        std::cerr << "\n Left and Right cam have different distortion model.  Cannot use stereo rectifcation!\n";
-        return;
-    }
-
-    if( cv::countNonZero(pcalib_model_left_->Dcv_) == 0 && 
-        cv::countNonZero(pcalib_model_right_->Dcv_) == 0 &&
-        pcalib_model_right_->Tc0ci_.rotationMatrix().isIdentity(1.e-5) )
-    {
-        std::cout << "\n No distorsion and R_left_right = I3x3 / NO rectif to apply!";
-        return;
-    }
-
-    if( pcalib_model_left_->model_ == CameraCalibration::Pinhole )
-    {
-        cv::stereoRectify(
-                pcalib_model_left_->Kcv_, pcalib_model_left_->Dcv_,
-                pcalib_model_right_->Kcv_, pcalib_model_right_->Dcv_,
-                pcalib_model_left_->img_size_, 
-                pcalib_model_right_->Rcv_cic0_, 
-                pcalib_model_right_->tcv_cic0_,
-                Rl, Rr, Pl, Pr, Q, cv::CALIB_ZERO_DISPARITY, 
-                pslamstate_->alpha_,
-                pcalib_model_left_->img_size_, 
-                &rectleft, &rectright
-                );
-    }
-    else 
-    {
-        cv::fisheye::stereoRectify(
-                pcalib_model_left_->Kcv_, pcalib_model_left_->Dcv_,
-                pcalib_model_right_->Kcv_, pcalib_model_right_->Dcv_,
-                pcalib_model_left_->img_size_, 
-                pcalib_model_right_->Rcv_cic0_, 
-                pcalib_model_right_->tcv_cic0_,
-                Rl, Rr, Pl, Pr, Q, cv::CALIB_ZERO_DISPARITY, 
-                pcalib_model_left_->img_size_, 
-                pslamstate_->alpha_
-                );
-        
-        rectleft = cv::Rect(0, 0, pcalib_model_left_->img_w_, pcalib_model_left_->img_h_);
-        rectright = cv::Rect(0, 0, pcalib_model_right_->img_w_, pcalib_model_right_->img_h_);
-    }
-
-    std::cout << "\n Alpha : " << pslamstate_->alpha_;
-
-    std::cout << "\n Kl : \n" << pcalib_model_left_->Kcv_;
-    std::cout << "\n Kr : \n" << pcalib_model_right_->Kcv_;
-
-    std::cout << "\n Dl : \n" << pcalib_model_left_->Dcv_;
-    std::cout << "\n Dr : \n" << pcalib_model_right_->Dcv_;
-
-    std::cout << "\n Rl : \n" << Rl;
-    std::cout << "\n Rr : \n" << Rr;
-    
-    std::cout << "\n Pl : \n" << Pl;
-    std::cout << "\n Pr : \n" << Pr;
-
-    // % OpenCV can handle left-right or up-down camera arrangements
-    // isVerticalStereo = abs(RCT.P2(2,4)) > abs(RCT.P2(1,4));
-
-    pcalib_model_left_->setUndistStereoMap(Rl, Pl, rectleft);
-    pcalib_model_right_->setUndistStereoMap(Rr, Pr, rectright);
-
-    // SLAM state keeps track of the initial intrinsic
-    // parameters (perhaps to be used for optim...)
-    pslamstate_->fxl_ = pcalib_model_left_->fx_;
-    pslamstate_->fyl_ = pcalib_model_left_->fy_;
-    pslamstate_->cxl_ = pcalib_model_left_->cx_;
-    pslamstate_->cyl_ = pcalib_model_left_->cy_;
-
-    pslamstate_->fxr_ = pcalib_model_right_->fx_;
-    pslamstate_->fyr_ = pcalib_model_right_->fy_;
-    pslamstate_->cxr_ = pcalib_model_right_->cx_;
-    pslamstate_->cyr_ = pcalib_model_right_->cy_;
 }
 
 void SlamManager::reset()
@@ -431,14 +274,12 @@ void SlamManager::reset()
     pmapper_->reset();
 
     pslamstate_->reset();
-    Logger::reset();
 
     frame_id_ = -1;
 
     std::lock_guard<std::mutex> lock(img_mutex_);
     
-    qimg_left_ = std::queue<cv::Mat>(); 
-    qimg_right_ = std::queue<cv::Mat>();
+    qimg_ = std::queue<cv::Mat>(); 
     qimg_time_ = std::queue<double>();
 
     bnew_img_available_ = false;
@@ -475,7 +316,7 @@ cv::Mat SlamManager::visualFrame()
         }
 
         if( pslamstate_->breset_req_ ) ss << "RESET REQUIRED";
-        else ss << (pslamstate_->slam_mode_ ? " SLAM ON  |  " : " SLAM OFF |  ") 
+        else ss << " SLAM ON  |  "
                 << "KEY FRAMES : " << (pmap_->map_pkfs_.size()) <<", MAP POINTS : " << (pmap_->map_plms_.size());
     } else {
         ss << "WAITING FOR IMAGES";
@@ -493,137 +334,3 @@ cv::Mat SlamManager::visualFrame()
 
     return img_text;
 }
-
-// ==========================
-// Write Results functions
-// ==========================
-
-
-void SlamManager::writeResults()
-{
-    // Make sure that nothing is running in the background
-    while( pslamstate_->blocalba_is_on_ || pslamstate_->blc_is_on_ ) {
-        std::chrono::seconds dura(1);
-        std::this_thread::sleep_for(dura);
-    }
-
-    // Write Trajectories files
-    Logger::writeTrajectory("ov2slam_traj.txt");
-    Logger::writeTrajectoryKITTI("ov2slam_traj_kitti.txt");
-
-    for( const auto & kfid_pkf : pmap_->map_pkfs_ )
-    {
-        auto pkf = kfid_pkf.second;
-        if( pkf != nullptr ) {
-            Logger::addKfSE3Pose(pkf->img_time_, pkf->getTwc());
-        }
-    }
-    Logger::writeKfsTrajectory("ov2slam_kfs_traj.txt");
-
-    // Apply full BA on KFs + 3D MPs if required + save
-    if( pslamstate_->do_full_ba_ ) 
-    {
-        std::lock_guard<std::mutex> lock(pmap_->map_mutex_);
-        pmapper_->runFullBA();
-
-        for( const auto & kfid_pkf : pmap_->map_pkfs_ ) {
-            auto pkf = kfid_pkf.second;
-            if( pkf != nullptr ) {
-                Logger::addKfSE3Pose(pkf->img_time_, pkf->getTwc());
-            }
-        }
-
-        Logger::writeKfsTrajectory("ov2slam_fullba_kfs_traj.txt");
-    }
-
-    // Write full trajectories taking into account LC
-    if( pslamstate_->buse_loop_closer_ )
-    {
-        writeFullTrajectoryLC();
-    }
-}
-
-
-void SlamManager::writeFullTrajectoryLC()
-{
-    std::vector<Sophus::SE3d, Eigen::aligned_allocator<Sophus::SE3d>> vTwc;
-    std::vector<Sophus::SE3d, Eigen::aligned_allocator<Sophus::SE3d>> vTpc;
-    std::vector<bool> viskf;
-
-    vTwc.reserve(Logger::vframepose_.size());
-    vTpc.reserve(Logger::vframepose_.size());
-    viskf.reserve(Logger::vframepose_.size());
-
-    size_t kfid = 0;
-
-    Sophus::SE3d Twc, Twkf;
-
-    std::ofstream f;
-    std::string filename = "ov2slam_full_traj_wlc.txt";
-
-    std::cout << "\n Going to write the full trajectory w. LC into : " << filename << "\n";
-
-    f.open(filename.c_str());
-    f << std::fixed;
-
-    float fid = 0.;
-
-    for( auto & fr : Logger::vframepose_ )
-    {
-        if( !fr.iskf_ || (fr.iskf_ && !pmap_->map_pkfs_.count(kfid)) ) 
-        {
-            // Get frame's pose from relative pose w.r.t. prev frame
-            Eigen::Map<Eigen::Vector3d> t(fr.tprev_cur_);
-            Eigen::Map<Eigen::Quaterniond> q(fr.qprev_cur_);
-
-            vTpc.push_back(Sophus::SE3d(q,t));
-
-            Sophus::SE3d Tprevcur(q,t);
-
-            Twc = Twc * Tprevcur;
-
-            viskf.push_back(false);
-
-        } else {
-
-            // Get keyframe's pose from map manager
-            auto pkf = pmap_->map_pkfs_.at(kfid);
-
-            Twc = pkf->getTwc();
-
-            Twkf = Twc;
-
-            kfid++;
-
-            viskf.push_back(true);
-
-            Eigen::Map<Eigen::Vector3d> t(fr.tprev_cur_);
-            Eigen::Map<Eigen::Quaterniond> q(fr.qprev_cur_);
-            vTpc.push_back(Sophus::SE3d(q,t));
-        }
-
-        vTwc.push_back(Twc);
-
-        Eigen::Vector3d twc = Twc.translation();
-        Eigen::Quaterniond qwc = Twc.unit_quaternion();
-
-        f << std::setprecision(9) << fid << " " << twc.x() << " " << twc.y() << " " << twc.z()
-            << " " << qwc.x() << " " << qwc.y() << " " << qwc.z() << " " << qwc.w() << std::endl;
-
-        f.flush();
-
-        fid += 1.;
-    }
-
-    f.close();
-
-    std::cout << "\nFull Trajectory w. LC file written!\n";
-    
-    // Apply full pose graph for optimal full trajectory w. LC
-    pmapper_->pestimator_->poptimizer_->fullPoseGraph(vTwc, vTpc, viskf);
-}
-
-std::vector<SE3Pose> Logger::vse3pose_, Logger::vfullse3pose_;
-std::map<double, SE3Pose>  Logger::vse3kfpose_;
-std::vector<KittiPose> Logger::vkittipose_;
-std::vector<FramePose> Logger::vframepose_;
