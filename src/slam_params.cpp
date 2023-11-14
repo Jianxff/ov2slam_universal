@@ -172,3 +172,109 @@ void SlamParams::reset() {
     bvision_init_ = false;
     breset_req_ = false;
 }
+
+SlamParams::SlamParams(int imwidth, int imheight, bool debug, bool accurate) {
+    debug_ = debug;
+    log_timings_ = false;
+    mono_ = 1;
+    stereo_ = 0;
+    
+    slam_mode_ = 1;
+    cam_left_topic_.assign("camera");
+    cam_left_model_.assign("pinhole");
+    
+    // real time
+    bforce_realtime_ = 1;
+    
+    // loop closer
+    buse_loop_closer_ = 1;
+
+    img_left_w_ = imwidth;
+    img_left_h_ = imheight;
+
+    cxl_ = (double) imwidth * 0.5;
+    cyl_ = (double) imheight * 0.5;
+
+    fyl_ = fxl_ = imheight > imwidth ? imwidth : imheight;
+
+    k1l_ = 0;
+    k2l_ = 0;
+    p1l_ = 0;
+    p2l_ = 0;
+
+    finit_parallax_ = 20.;
+
+    // bdo_stereo_rect_ = 0;
+    alpha_ = 0;
+
+    bdo_undist_ = 0;
+    
+    bdo_random = 1;
+
+    use_shi_tomasi_ = 0;
+
+    use_fast_ = !accurate;
+    use_brief_ = accurate;
+    use_singlescale_detector_ = accurate;
+
+    nfast_th_ = 10;
+    dmaxquality_ = 0.001;
+
+    nmaxdist_ = accurate ? 35 : 50;
+    float nbwcells = ceil( (float)img_left_w_ / nmaxdist_ );
+    float nbhcells = ceil( (float)img_left_h_ / nmaxdist_ );
+    nbmaxkps_ = nbwcells * nbhcells;
+
+    use_clahe_ = accurate;
+    fclahe_val_ = 3;
+
+    do_klt_ = 1;
+    klt_use_prior_ = 1;
+
+    btrack_keyframetoframe_ = 0;
+
+    nklt_win_size_ = 9;
+    nklt_pyr_lvl_ = 3;
+
+    klt_win_size_ = cv::Size(nklt_win_size_, nklt_win_size_);
+
+    fmax_fbklt_dist_ = 0.5;
+    nmax_iter_ = 30;
+    fmax_px_precision_ =0.01;
+
+    
+    nklt_err_ = 30.;
+
+    // Matching th.
+    bdo_track_localmap_ = 1;
+
+    fmax_desc_dist_ = 0.2;
+    fmax_proj_pxdist_ = 2.;
+
+    doepipolar_ = 1;
+    dop3p_ = accurate;
+
+    fransac_err_ = 3.;
+    fepi_th_ = fransac_err_;
+    nransac_iter_ = 100;
+
+    fmax_reproj_err_ = 3.;
+    buse_inv_depth_ = 1;
+
+    // Bundle Adjustment Parameters
+    // (mostly related to Ceres options)
+    robust_mono_th_ = 5.9915;
+
+    use_sparse_schur_ = 1;
+    use_dogleg_ = 0;
+    use_subspace_dogleg_ = 0;
+    use_nonmonotic_step_ = 0;
+
+    apply_l2_after_robust_ = 1;
+
+    nmin_covscore_ = 25;
+
+    // Map Filtering parameters
+    fkf_filtering_ratio_ = 0.9;
+    
+}

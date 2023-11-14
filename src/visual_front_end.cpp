@@ -255,7 +255,7 @@ void VisualFrontEnd::kltTracking()
 
         for(size_t i = 0 ; i < nbkps  ; i++ ) 
         {
-            if( vkpstatus.at(i) ) {
+            if(vkpstatus.at(i) ) {
                 pcurframe_->updateKeypoint(vkpids.at(i), vpriors.at(i));
                 nbgood++;
             } else {

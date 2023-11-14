@@ -122,8 +122,6 @@ void SlamManager::run()
     cv::Mat img_left, img_right;
 
     double time = -1.; // Current image timestamp
-    double cam_delay = -1.; // Delay between two successive images
-    double last_img_time = -1.; // Last received image time
 
     // Main SLAM loop
     while( !bexit_required_ ) {
@@ -135,17 +133,6 @@ void SlamManager::run()
             // Update current frame
             frame_id_++;
             pcurframe_->updateFrame(frame_id_, time);
-
-            // Update cam delay for automatic exit
-            double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
-            if( frame_id_ > 0 ) {
-                cam_delay = time_now_ms / 1e3 - last_img_time;
-                last_img_time += cam_delay;
-            } else {
-                last_img_time = time_now_ms / 1e3;
-            }
 
             // Display info on current frame state
             if( pslamstate_->debug_ )
@@ -197,36 +184,16 @@ void SlamManager::run()
 
         } 
         else {
-
-            // 3. Check if we are done with a sequence!
-            // ========================================
-            bool c1 = cam_delay > 0;
-            double time_now_ms = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
-            bool c2 = ( time_now_ms / 1e3 - last_img_time ) > 100. * cam_delay;
-            bool c3 = !bnew_img_available_;
-
-            if( c1 && c2 && c3 )
-            {
-                bexit_required_ = true;
-
-                // Warn threads to stop and then save the results only in this case of 
-                // automatic stop because end of sequence reached 
-                // (avoid wasting time when forcing stop by CTRL+C)
-                pmapper_->bexit_required_ = true;
-
-                writeResults();
-
-            }
-            else {
-                std::chrono::milliseconds dura(1);
-                std::this_thread::sleep_for(dura);
-            }
+            std::chrono::milliseconds dura(1);
+            std::this_thread::sleep_for(dura);
         }
     }
 
     std::cout << "\nOV²SLAM is stopping!\n";
+
+    pmapper_->bexit_required_ = true;
+
+    writeResults();
 
     bis_on_ = false;
 }

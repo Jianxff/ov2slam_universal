@@ -72,7 +72,7 @@ force_realtime: 1
 slam_mode: 1
 
 # Loop Closing mode
-buse_loop_closer: 0
+buse_loop_closer: 1
 
 # Stereo rectify or not
 bdo_stereo_rect: 0

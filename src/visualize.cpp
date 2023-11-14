@@ -52,10 +52,15 @@ void Visualize::run() {
 
     if( !im.empty() ) { 
       cv::imshow("current frame", im);
-      cv::waitKey(1000 / 30);
+      cv::waitKey(1);
     }
     
   }
+
+  cv::destroyAllWindows();
+  pangolin::DestroyWindow("global mapping");
+  
+  std::cout << "visualize thread exit" << std::endl;
 }
 
 void Visualize::updateCamrea()

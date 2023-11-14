@@ -1,28 +1,48 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.0)
 project(ov2slam)
 
-
-add_definitions(-DOPENCV_CONTRIB)
-add_definitions(-DIBOW_LCD)
-
+##########################
+# cmake flags
+##########################
 set(CMAKE_CXX_STANDARD 17)
-
 set(CMAKE_BUILD_TYPE "Release")
 
 
-## System dependencies are found with CMake's conventions
+##########################
+# project options
+##########################
+option(USE_BRIEF "Use brief descriptor" ON)
+option(USE_LOOP_CLOSER "Use Loop-Closer" ON)
+
+if(USE_LOOP_CLOSER)
+  add_definitions(-DIBOW_LCD)
+endif(USE_LOOP_CLOSER)
+
+if(USE_BRIEF)
+  add_definitions(-DOPENCV_CONTRIB)
+endif(USE_BRIEF)
+
+
+##########################
+# find package
+##########################
 find_package(OpenCV 3 REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Ceres REQUIRED)
 find_package(Sophus REQUIRED)
 find_package(Pangolin REQUIRED)
 
-###########
-## Build ##
-###########
 
-## Declare a C++ library
-add_library(${PROJECT_NAME}
+##########################
+# pybind11
+##########################
+add_subdirectory(${PROJECT_SOURCE_DIR}/Thirdparty/pybind11)
+
+
+##########################
+# build pybind module
+##########################
+pybind11_add_module(${PROJECT_NAME}
   src/camera_calibration.cpp
   src/ceres_parametrization.cpp
   src/estimator.cpp
@@ -38,14 +58,16 @@ add_library(${PROJECT_NAME}
   src/ov2slam.cpp
   src/slam_params.cpp
   src/visual_front_end.cpp
+  src/visualize.cpp
+  src/wrapper_py.cpp
 )
 
-# Add mandatory dependencies
 target_include_directories(${PROJECT_NAME}
   PUBLIC
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/include/ceres_parametrization
     ${PROJECT_SOURCE_DIR}/Thirdparty/pybind11/include/
+    /usr/include/python3.8
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -55,38 +77,24 @@ target_link_libraries(${PROJECT_NAME}
     PRIVATE
       ${OpenCV_LIBS}
       Ceres::ceres
+      ${Pangolin_LIBRARIES}
 )
 
 
-target_include_directories(
-  ${PROJECT_NAME}
-  PUBLIC
-    ${PROJECT_SOURCE_DIR}/Thirdparty/obindex2/lib/include/
-    ${PROJECT_SOURCE_DIR}/Thirdparty/ibow_lcd/include/
-)
+##########################
+# use loop closer
+##########################
+if(USE_LOOP_CLOSER)
+  target_include_directories(
+    ${PROJECT_NAME}
+    PUBLIC
+      ${PROJECT_SOURCE_DIR}/Thirdparty/obindex2/lib/include/
+      ${PROJECT_SOURCE_DIR}/Thirdparty/ibow_lcd/include/
+  )
 
-target_link_libraries(
-  ${PROJECT_NAME}
-    PRIVATE
-      ${PROJECT_SOURCE_DIR}/Thirdparty/ibow_lcd/build/liblcdetector.so
-)
-
-
-
-# ## Add cmake target dependencies of the library
-# ## as an example, code may need to be generated before libraries
-# # set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/example)
-# set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/example)
-
-# add_executable(mono_euroc 
-#   example/mono_euroc.cpp 
-#   src/visualize.cpp
-# )
-
-# ## Specify libraries to link a library or executable target against
-# target_link_libraries(
-#     mono_euroc
-#     PRIVATE
-#       ${PROJECT_NAME}
-#       ${Pangolin_LIBRARIES}
-# )
+  target_link_libraries(
+    ${PROJECT_NAME}
+      PRIVATE
+        ${PROJECT_SOURCE_DIR}/Thirdparty/ibow_lcd/build/liblcdetector.so
+  )
+endif(USE_LOOP_CLOSER)
