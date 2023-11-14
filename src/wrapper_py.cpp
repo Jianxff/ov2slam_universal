@@ -170,10 +170,10 @@ PYBIND11_MODULE(ov2slam, m) {
 	m.doc() = "OV2SLAM Python Bindings";
 
 	py::class_<Session>(m, "Session")
-        .def_static("create", (Session (*)(const std::string)) &Session::create)
-        .def_static("create", (Session (*)(const int, const int, const bool)) &Session::create)
+        .def_static("create", (Session (*)(const std::string)) &Session::create, py::arg("config_file"))
+        .def_static("create", (Session (*)(const int, const int, const bool)) &Session::create, py::arg("imwidth"), py::arg("imheight"), py::arg("debug") = false)
 		.def("startVisualize", &Session::startVisualize)
-		.def("addTrack", &Session::addTrack)
+		.def("addTrack", &Session::addTrack, py::arg("image"), py::arg("time_ms") = -1)
 		.def("getCameraPoseMatrix", &Session::getCameraPoseMatrix)
 		// .def("getFeaturePoints", &Session::getFeaturePoints)
 		.def("stop", &Session::stop);
