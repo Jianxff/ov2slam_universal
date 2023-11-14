@@ -143,6 +143,8 @@ void SlamManager::run()
 
     std::cout << "\nOV²SLAM is stopping!\n";
 
+    pmapper_->bexit_required_ = true;
+    
     mapper_thread.join();
 
     bis_on_ = false;

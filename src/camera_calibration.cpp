@@ -32,21 +32,7 @@ CameraCalibration::CameraCalibration(const std::string &model, double fx, double
     : fx_(fx), fy_(fy), cx_(cx), cy_(cy), k1_(k1), k2_(k2), p1_(p1), p2_(p2)
     , img_w_(img_w), img_h_(img_h), img_size_(img_w, img_h)
 {
-    std::cout << "\n Setting up camera, model selected : " << model << "\n";
-
-    if( model == "pinhole") {
-        model_ = Pinhole;
-        std::cout << "\nPinhole Camera Model created\n";
-    }
-    else if( model == "fisheye" ) {
-        model_ = Fisheye;
-        std::cout << "\nFisheye Camera Model selected";
-    }
-    else {
-        std::cout << "\nNo supported camera model provided!"; 
-        std::cout << "\nChoosee between: pinhole / fisheye";
-        exit(-1);
-    }
+    model_ = Pinhole;
 
     K_ << fx_, 0., cx_, 0., fy_, cy_, 0., 0., 1.;
     D_ << k1_, k2_, p1_, p2_;

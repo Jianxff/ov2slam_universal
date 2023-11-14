@@ -48,7 +48,7 @@ public:
     
     SlamParams(const cv::FileStorage &fsSettings);
 
-    SlamParams(int imwidth, int imheight, int fov = 70, bool accurate = true);
+    SlamParams(int imwidth, int imheight, bool accurate = true);
 
     void reset();
 

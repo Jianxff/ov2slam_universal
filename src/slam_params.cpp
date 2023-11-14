@@ -124,8 +124,10 @@ SlamParams::SlamParams(const cv::FileStorage &fsSettings) {
     fkf_filtering_ratio_ = fsSettings["fkf_filtering_ratio"]; 
 }
 
-SlamParams::SlamParams(int imwidth, int imheight, int fov, bool accurate){
-    bforce_realtime_ = 1;
+SlamParams::SlamParams(int imwidth, int imheight, bool accurate){
+    debug_ = false;
+
+    bforce_realtime_ = 0;
 
     img_left_w_ = imwidth;
     img_left_h_ = imheight;
@@ -133,20 +135,11 @@ SlamParams::SlamParams(int imwidth, int imheight, int fov, bool accurate){
     cxl_ = (double) imwidth * 0.5;
     cyl_ = (double) imheight * 0.5;
 
-    // auto-calculate fx and fy
-    double aspect = (double) imwidth / (double) imheight;
-    double fovH = imwidth > imheight ? (fov * aspect) : fov; 
-    double fovV = imwidth > imheight ? fov : (fov * aspect);
-    
-    double fx = cxl_ / std::tan(fovH * 0.5 * M_PI / 180);
-    double fy = cyl_ / std::tan(fovV * 0.5 * M_PI / 180);
-    
-    fxl_ = std::min(fx, fy);
-    fyl_ = fxl_;
-    
+    fyl_ = fxl_ = imheight > imwidth ? imwidth : imheight;
 
-    k1l_ = 0;
-    k2l_ = 0;
+
+    k1l_ = -0.28340811;
+    k2l_ = 0.07395907;
     p1l_ = 0;
     p2l_ = 0;
 
@@ -161,9 +154,9 @@ SlamParams::SlamParams(int imwidth, int imheight, int fov, bool accurate){
 
     use_shi_tomasi_ = 0;
 
-    use_fast_ = accurate ? 0 : 1;
-    use_brief_ = 1;
-    use_singlescale_detector_ = accurate ? 1 : 0;
+    use_fast_ = !accurate;
+    use_brief_ = accurate;
+    use_singlescale_detector_ = accurate;
 
     nfast_th_ = 10;
     dmaxquality_ = 0.001;
@@ -173,7 +166,7 @@ SlamParams::SlamParams(int imwidth, int imheight, int fov, bool accurate){
     float nbhcells = ceil( (float)img_left_h_ / nmaxdist_ );
     nbmaxkps_ = nbwcells * nbhcells;
 
-    use_clahe_ = 0;
+    use_clahe_ = accurate;
     fclahe_val_ = 3;
 
     do_klt_ = 1;
@@ -200,7 +193,7 @@ SlamParams::SlamParams(int imwidth, int imheight, int fov, bool accurate){
     fmax_proj_pxdist_ = 2.;
 
     doepipolar_ = 1;
-    dop3p_ = accurate ? 1 : 0;
+    dop3p_ = accurate;
 
     fransac_err_ = 3.;
     fepi_th_ = fransac_err_;

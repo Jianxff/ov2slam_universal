@@ -11,9 +11,9 @@ set(CMAKE_BUILD_TYPE "Release")
 ##########################
 # project options
 ##########################
-option(MULTI_THREAD "Use multi-threading" ON)
 option(USE_BRIEF "Use brief descriptor" ON)
-option(JS_DEBUG "Open debug mode" ON)
+option(MULTI_THREAD "Use multi-threading" OFF)
+option(JS_DEBUG "Open debug mode" OFF)
 
 if(MULTI_THREAD)
   message(STATUS "Multi-threading is on")
@@ -44,10 +44,9 @@ find_package(OpenCV REQUIRED)
 ##########################
 set(COMPILE_FLAG_TEXT "-O3 -fexceptions")
 set(LINK_FLAG_TEXT "-s USE_ZLIB=1 -s DYNAMIC_EXECUTION=0 \
-  -s MODULARIZE=1 -s EXPORT_NAME=createModule -s SINGLE_FILE=1 \
   -s INITIAL_MEMORY=256MB -s ALLOW_MEMORY_GROWTH=1 -s ALLOW_TABLE_GROWTH=1 \
-  -s NO_DISABLE_EXCEPTION_CATCHING=1 \
-  -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
+  -s NO_DISABLE_EXCEPTION_CATCHING=1 -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
+  -s MODULARIZE=1 -s EXPORT_NAME=createModule -s SINGLE_FILE=1 \
   -O3 -fexceptions --no-entry --no-check-features --bind"
 )
 
@@ -86,6 +85,7 @@ add_executable(${PROJECT_NAME}
   src/ov2slam.cpp
   src/slam_params.cpp
   src/visual_front_end.cpp
+  src/wrapper_js.cpp
 )
 
 ### include 

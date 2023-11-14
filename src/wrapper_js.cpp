@@ -28,7 +28,7 @@ public:
         _module = Module;
     }
 
-    void init(int nwidth, int nheight, int fov = 70){
+    void init(int nwidth, int nheight){
         if(initialized) {
             puts("Already initialized!\n");
             return;
@@ -38,7 +38,7 @@ public:
 
         fpts.reserve(100);
         mem_ptr.reset(new uint8_t[nsize]);
-        pparams.reset(new SlamParams(nw, nh, fov));
+        pparams.reset(new SlamParams(nw, nh));
         pslam.reset(new SlamManager(pparams));
 
 #ifdef MULTI_THREAD
@@ -48,7 +48,7 @@ public:
         initialized = true;
     }
 
-    emscripten::val updateImage(emscripten::val arrayBuffer){
+    emscripten::val addImage(emscripten::val arrayBuffer){
         if(!initialized) {
             puts("Not initialized!\n");
             return emscripten::val(-1);
@@ -64,9 +64,9 @@ public:
 
         pslam->addNewMonoImage(time_st / 1000.0, image);
 
-#ifndef MULTI_THREAD
-        pslam->step();
-#endif
+// #ifndef MULTI_THREAD
+//         pslam->step();
+// #endif
 
         // if(pslam->pslamstate_->breset_req_) {
         //     return emscripten::val(1);
@@ -74,6 +74,12 @@ public:
 
         return emscripten::val(0);
     }
+
+#ifndef MULTI_THREAD
+    void update() {
+        pslam->step();
+    }
+#endif
 
     emscripten::val getCameraPoseMatrix() {
         if(!initialized) {
@@ -164,7 +170,10 @@ EMSCRIPTEN_BINDINGS(Slam){
     emscripten::class_<Session>("Session")
         .constructor<emscripten::val>()
         .function("init", &Session::init)
-        .function("updateImage", &Session::updateImage)
+        .function("addImage", &Session::addImage)
+#ifndef MULTI_THREAD
+        .function("update", &Session::update)
+#endif
         .function("getCameraPoseMatrix", &Session::getCameraPoseMatrix)
         .function("getFeaturePoints", &Session::getFeaturePoints)
         .function("stop", &Session::stop);
