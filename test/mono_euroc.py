@@ -24,14 +24,14 @@ if __name__ == '__main__' :
   
   imgs, ts = load_image(img_folder, img_ts)
   
-  session = ov2slam.Session.create(conf)
+  session = ov2slam.Session(conf)
   session.startVisualize()
   
   input('wait for pangolin')
   
   for i in range(0, len(imgs)):
     img = cv2.imread(imgs[i])
-    session.addTrack(img, float(ts[i]))
+    session.add_track(img, float(ts[i]))
     time.sleep(1/30)
     
   input()

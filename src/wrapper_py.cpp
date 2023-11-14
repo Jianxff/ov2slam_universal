@@ -17,16 +17,24 @@ namespace py = pybind11;
 
 class Session {
 public:
-    static Session create(const std::string config_file) {
-        Session session;
-        session.init(config_file);
-        return session;
+    Session(const std::string config_file) {
+		const cv::FileStorage fsSettings(config_file.c_str(), cv::FileStorage::READ);
+    	if(!fsSettings.isOpened()) {
+        	std::cout << "Failed to open settings file";
+        	exit(-1);
+    	}
+
+        pparams.reset(new SlamParams(fsSettings));
+        pslam.reset(new SlamManager(pparams));
+		slam_thread = std::thread(&SlamManager::run, pslam);
+		initialized = true;
     }
 
-    static Session create(const int imwidth, const int imheight, const bool debug) {
-        Session session;
-        session.init(imwidth, imheight, debug);
-        return session;
+    Session(const int imwidth, const int imheight, const bool debug) {
+        pparams.reset(new SlamParams(imwidth, imheight, debug));
+        pslam.reset(new SlamManager(pparams));
+        slam_thread = std::thread(&SlamManager::run, pslam);
+        initialized = true;
     }
     
 
@@ -110,42 +118,6 @@ public:
     }
 
 private:
-    bool init(const std::string config_file){
-        if(initialized) {
-            puts("Already initialized!\n");
-            return false;
-        }
-		
-		const cv::FileStorage fsSettings(config_file.c_str(), cv::FileStorage::READ);
-    	if(!fsSettings.isOpened()) {
-        	std::cout << "Failed to open settings file";
-        	return false;
-    	}
-
-        pparams.reset(new SlamParams(fsSettings));
-        pslam.reset(new SlamManager(pparams));
-
-		slam_thread = std::thread(&SlamManager::run, pslam);
-
-		initialized = true;
-		return true;
-    }
-
-
-    bool init(const int imwidth,const int imheight, const bool debug){
-        if(initialized) {
-            puts("Already initialized!\n");
-            return false;
-        }
-
-        pparams.reset(new SlamParams(imwidth, imheight, debug));
-        pslam.reset(new SlamManager(pparams));
-
-        slam_thread = std::thread(&SlamManager::run, pslam);
-        
-        initialized = true;
-		return true;
-    }
 
     cv::Mat getImageBGR(py::array_t<uint8_t>& input) {
         if(input.ndim() != 3) 
@@ -170,11 +142,11 @@ PYBIND11_MODULE(ov2slam, m) {
 	m.doc() = "OV2SLAM Python Bindings";
 
 	py::class_<Session>(m, "Session")
-        .def_static("create", (Session (*)(const std::string)) &Session::create, py::arg("config_file"))
-        .def_static("create", (Session (*)(const int, const int, const bool)) &Session::create, py::arg("imwidth"), py::arg("imheight"), py::arg("debug") = false)
-		.def("startVisualize", &Session::startVisualize)
-		.def("addTrack", &Session::addTrack, py::arg("image"), py::arg("time_ms") = -1)
-		.def("getCameraPoseMatrix", &Session::getCameraPoseMatrix)
+        .def(py::init<const std::string>(), py::arg("config_file"))
+        .def(py::init<const int, const int, const bool>(), py::arg("imwidth"), py::arg("imheight"), py::arg("debug") = false)
+        .def("enable_viewer", &Session::startVisualize)
+		.def("add_track", &Session::addTrack, py::arg("image"), py::arg("time_ms") = -1)
+		.def("camera_pose", &Session::getCameraPoseMatrix)
 		// .def("getFeaturePoints", &Session::getFeaturePoints)
 		.def("stop", &Session::stop);
 
